@@ -10,7 +10,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from jarvis import __version__
-from jarvis.ai.brain import Brain
 from jarvis.ai.ollama_client import (
     OllamaClient,
     OllamaError,
@@ -20,6 +19,7 @@ from jarvis.ai.ollama_client import (
 )
 from jarvis.api.routes import router
 from jarvis.config import Settings, load_settings
+from jarvis.wiring import build_brain
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def create_app(settings: Settings | None = None, client: OllamaClient | None = N
     """Build the application. `client` can be replaced in tests."""
     settings = settings or load_settings()
     client = client or OllamaClient.from_settings(settings.ollama)
-    brain = Brain(client, max_history_turns=settings.brain.max_history_turns)
+    brain = build_brain(settings, client)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,18 @@ def is_prompt_echo(text: str, prompt: str | None) -> bool:
     return cleaned == prompt.strip().lower().rstrip(".") or cleaned.startswith("vocabulary:")
 
 
+def fix_assistant_name(text: str, aliases: list[str]) -> str:
+    """Turn a misheard name at the start of a sentence into JARVIS ("Hey Travis, ..." -> "Hey JARVIS, ...").
+
+    Only the start of the sentence is touched, so a real "Travis" elsewhere stays as it is.
+    """
+    if not aliases:
+        return text
+    names = "|".join(re.escape(a) for a in aliases)
+    pattern = rf"^(\W*(?:(?:hey|hi|hello|ok|okay)\b[\s,]*)?)(?:{names})\b"
+    return re.sub(pattern, r"\1JARVIS", text, count=1, flags=re.IGNORECASE)
+
+
 class FasterWhisperTranscriber:
     def __init__(
         self,
@@ -36,8 +49,10 @@ class FasterWhisperTranscriber:
         cpu_threads: int = 4,
         download_root: Path | None = None,
         hint_words: list[str] | None = None,
+        name_aliases: list[str] | None = None,
         model_factory: Callable[[], Any] | None = None,
     ) -> None:
+        self._name_aliases = name_aliases or []
         self._model_name = model
         self._language = language
         self._compute_type = compute_type
@@ -86,4 +101,4 @@ class FasterWhisperTranscriber:
         text = " ".join(segment.text.strip() for segment in segments).strip()
         if is_prompt_echo(text, self._prompt):
             return ""
-        return text
+        return fix_assistant_name(text, self._name_aliases)

@@ -22,9 +22,15 @@ class VoiceStack:
     trigger: Trigger
 
 
-def build_voice_stack(settings: Settings, use_enter: bool = False) -> VoiceStack:
-    """Create all voice parts. Downloads the Piper voice first if it is missing."""
+def build_voice_stack(
+    settings: Settings, use_enter: bool = False, extra_hints: list[str] | None = None
+) -> VoiceStack:
+    """Create all voice parts. Downloads the Piper voice first if it is missing.
+
+    `extra_hints` are extra names (your apps and projects) the recogniser should expect.
+    """
     voice = settings.voice
+    hints = list(dict.fromkeys([*voice.stt.hint_words, *(extra_hints or [])]))
     models_dir = settings.resolve_models_dir()
     voice_path = ensure_piper_voice(models_dir, voice.tts.voice)
 
@@ -36,7 +42,8 @@ def build_voice_stack(settings: Settings, use_enter: bool = False) -> VoiceStack
             compute_type=voice.stt.compute_type,
             cpu_threads=voice.stt.cpu_threads,
             download_root=whisper_dir(models_dir),
-            hint_words=voice.stt.hint_words,
+            hint_words=hints,
+            name_aliases=voice.stt.name_aliases,
         ),
         synthesizer=PiperSynthesizer(voice_path, voice.tts.length_scale),
         player=SoundDevicePlayer(voice.output_device),

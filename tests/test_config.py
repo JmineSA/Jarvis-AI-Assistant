@@ -97,3 +97,29 @@ def test_models_dir_is_project_relative_by_default():
 def test_relative_log_dir_is_project_relative():
     settings = Settings()
     assert settings.resolve_log_dir().is_absolute()
+
+
+def test_tools_defaults():
+    tools = Settings().tools
+    assert tools.enabled is True
+    assert tools.always_confirm == []
+    assert tools.profile_path == "config/profile.yaml"
+    assert Settings().resolve_profile_path().is_absolute()
+
+
+def test_profile_path_env_override():
+    settings = load_settings(env={"JARVIS_PROFILE": "/tmp/other.yaml"})
+    assert str(settings.resolve_profile_path()) == "/tmp/other.yaml"
+
+
+def test_tools_section_in_yaml(tmp_path):
+    path = tmp_path / "s.yaml"
+    path.write_text("tools:\n  enabled: false\n  always_confirm: [open_app]\n", encoding="utf-8")
+    tools = load_settings(path, env={}).tools
+    assert tools.enabled is False and tools.always_confirm == ["open_app"]
+
+
+def test_shipped_settings_target_the_focusrite_mic_and_name_fix():
+    settings = load_settings(env={})
+    assert settings.voice.input_device == 3
+    assert "Travis" in settings.voice.stt.name_aliases

@@ -47,6 +47,37 @@ class HealthStatus:
     detail: str = ""
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ChatResult:
+    content: str
+    tool_calls: tuple[ToolCall, ...] = ()
+
+
+def parse_tool_calls(raw: Any) -> tuple[ToolCall, ...]:
+    """Read the model's tool requests, tolerating the odd shapes small models produce."""
+    calls: list[ToolCall] = []
+    for item in raw if isinstance(raw, list) else []:
+        function = item.get("function") if isinstance(item, dict) else None
+        if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+            continue
+        arguments = function.get("arguments")
+        if isinstance(arguments, str):  # JSON text instead of an object
+            try:
+                arguments = json.loads(arguments)
+            except ValueError:
+                arguments = {}
+        calls.append(
+            ToolCall(function["name"], arguments if isinstance(arguments, dict) else {})
+        )
+    return tuple(calls)
+
+
 def _model_matches(wanted: str, installed: str) -> bool:
     if wanted == installed:
         return True
@@ -128,9 +159,8 @@ class OllamaClient:
                 f"Ollama returned HTTP {response.status_code}: {response.text[:200]}"
             )
 
-    async def chat(self, messages: list[Message]) -> str:
-        """Send the conversation and return the assistant's full reply."""
-        payload = self._payload(messages, stream=False)
+    async def _post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST to /api/chat and return the reply's "message" object."""
         try:
             response = await self._client.post("/api/chat", json=payload)
         except httpx.ConnectTimeout as exc:
@@ -145,13 +175,33 @@ class OllamaClient:
         self._check_status(response)
 
         try:
-            content = response.json()["message"]["content"]
+            message = response.json()["message"]
         except (ValueError, KeyError, TypeError) as exc:
             raise OllamaResponseError("Unexpected response format from Ollama.") from exc
+        if not isinstance(message, dict):
+            raise OllamaResponseError("Unexpected response format from Ollama.")
+        return message
 
+    async def chat(self, messages: list[Message]) -> str:
+        """Send the conversation and return the assistant's full reply."""
+        message = await self._post_chat(self._payload(messages, stream=False))
+        content = message.get("content")
         if not isinstance(content, str) or not content.strip():
             raise OllamaResponseError("Ollama returned an empty reply.")
         return content.strip()
+
+    async def chat_with_tools(
+        self, messages: list[Message], tools: list[dict[str, Any]]
+    ) -> ChatResult:
+        """Like chat(), but the model may answer with tool requests instead of text."""
+        payload = self._payload(messages, stream=False)
+        payload["tools"] = tools
+        message = await self._post_chat(payload)
+        content = message.get("content")
+        return ChatResult(
+            content=content.strip() if isinstance(content, str) else "",
+            tool_calls=parse_tool_calls(message.get("tool_calls")),
+        )
 
     async def chat_stream(self, messages: list[Message]) -> AsyncIterator[str]:
         """Yield the reply in pieces as the model produces it."""

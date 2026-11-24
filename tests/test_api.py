@@ -79,3 +79,13 @@ def test_client_closed_on_shutdown(settings, fake_client_cls):
     with make_app(settings, client):
         pass
     assert client.closed
+
+
+def test_chat_can_use_a_tool_and_answers_from_its_result(settings, fake_client_cls):
+    from jarvis.ai.ollama_client import ToolCall
+
+    client = fake_client_cls(tool_calls=[ToolCall("current_time", {})], tool_content="I made it up.")
+    with make_app(settings, client) as http:
+        body = http.post("/chat", json={"message": "what time is it"}).json()
+    assert body["reply"].startswith("It's ")
+    assert "made it up" not in body["reply"]

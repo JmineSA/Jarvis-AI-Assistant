@@ -1,0 +1,84 @@
+# Your personal JARVIS profile: what JARVIS may open for you.
+# JARVIS can ONLY open things listed here. Edit freely, then restart JARVIS.
+#
+# Paths: use single quotes so backslashes are safe. %USERPROFILE% and %LOCALAPPDATA% work.
+# "names" are other ways you might say it; the speech recogniser is taught these too.
+
+owner_name: Lesiba
+
+apps:
+  vscode:
+    label: VS Code
+    names: [visual studio code, vs code, vscode, code]
+    candidates:
+      - '%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe'
+      - 'C:\Program Files\Microsoft VS Code\Code.exe'
+      - code
+    folder_mode: arg          # "open VS Code in LightsOn" opens that folder
+
+  chrome:
+    label: Chrome
+    names: [google chrome, chrome, browser]
+    candidates:
+      - 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+      - 'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe'
+      - '%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe'
+      - chrome
+
+  powerbi:
+    label: Power BI
+    names: [power bi, power bi desktop, powerbi]
+    candidates:
+      # Installed from the Microsoft Store instead? Find PBIDesktop.exe and put its path here.
+      - 'C:\Program Files\Microsoft Power BI Desktop\bin\PBIDesktop.exe'
+      - PBIDesktop
+
+  jupyter:
+    label: Jupyter
+    names: [jupyter lab, jupyterlab, jupyter notebook, notebook]
+    candidates: [jupyter]     # must be installed and on your PATH, or give its full path
+    args: [lab]
+    folder_mode: cwd          # "open Jupyter in LightsOn" starts it inside that folder
+
+folders:
+  portfolio:
+    label: portfolio
+    names: [portfolio, portfolio projects]
+    path: 'G:\Study\DATA SCINCE\PROJECTS\POTFOLIO'
+
+  jarvis:
+    label: JARVIS
+    names: [jarvis project, jarvis folder]
+    path: 'G:\Study\DATA SCINCE\PROJECTS\POTFOLIO\jarvis'
+
+  dune:
+    label: Dune
+    names: [dune, j mine, personal os]
+    path: 'G:\Study\DATA SCINCE\PROJECTS\POTFOLIO\j_mine_personal_os'
+
+  lightson:
+    label: LightsOn
+    names: [lights on, solar project, solar, battery project]
+    # Check this path: it is my guess, next to your other projects.
+    path: 'G:\Study\DATA SCINCE\PROJECTS\POTFOLIO\lightson-solar-battery-forecasting'
+
+  downloads:
+    label: Downloads
+    path: '%USERPROFILE%\Downloads'
+
+  documents:
+    label: Documents
+    path: '%USERPROFILE%\Documents'
+
+websites:
+  databricks:
+    label: Databricks
+    names: [databricks, data bricks]
+    url: ''                   # put your workspace address here, e.g. https://adb-123456789.1.azuredatabricks.net
+    app: chrome
+
+  github:
+    label: GitHub
+    names: [my github, git hub]
+    url: https://github.com/JmineSA
+    app: chrome

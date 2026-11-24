@@ -140,3 +140,68 @@ async def test_untagged_model_name_matches_latest():
     )
     assert (await client.health()).model_available
     await client.aclose()
+
+
+# ------------------------------------------------------------------ tool calling
+
+TOOLS = [{"type": "function", "function": {"name": "current_time", "description": "d", "parameters": {"type": "object", "properties": {}}}}]
+
+
+async def test_chat_with_tools_sends_tools_and_parses_requests():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        message = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"function": {"name": "open_app", "arguments": {"name": "vscode"}}}],
+        }
+        return httpx.Response(200, json={"message": message})
+
+    client = make_client(handler)
+    result = await client.chat_with_tools(MESSAGES, TOOLS)
+    assert seen["body"]["tools"] == TOOLS
+    assert seen["body"]["stream"] is False
+    assert result.content == ""
+    assert [(c.name, c.arguments) for c in result.tool_calls] == [("open_app", {"name": "vscode"})]
+    await client.aclose()
+
+
+async def test_chat_with_tools_plain_answer_has_no_calls():
+    client = make_client(lambda request: httpx.Response(200, json={"message": {"content": " Hello. "}}))
+    result = await client.chat_with_tools(MESSAGES, TOOLS)
+    assert result.content == "Hello." and result.tool_calls == ()
+    await client.aclose()
+
+
+async def test_chat_with_tools_http_error_becomes_response_error():
+    client = make_client(lambda request: httpx.Response(400, text="does not support tools"))
+    with pytest.raises(OllamaResponseError, match="400"):
+        await client.chat_with_tools(MESSAGES, TOOLS)
+    await client.aclose()
+
+
+async def test_chat_with_tools_unreachable_raises_unavailable():
+    def handler(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    client = make_client(handler)
+    with pytest.raises(OllamaUnavailableError):
+        await client.chat_with_tools(MESSAGES, TOOLS)
+    await client.aclose()
+
+
+def test_parse_tool_calls_is_forgiving():
+    from jarvis.ai.ollama_client import parse_tool_calls
+
+    raw = [
+        {"function": {"name": "a", "arguments": '{"x": 1}'}},   # arguments as JSON text
+        {"function": {"name": "b", "arguments": "not json"}},    # unreadable arguments -> empty
+        {"function": {"name": "c"}},                              # no arguments
+        {"function": {"arguments": {}}},                          # no name: dropped
+        "nonsense",                                               # not an object: dropped
+    ]
+    calls = parse_tool_calls(raw)
+    assert [(c.name, c.arguments) for c in calls] == [("a", {"x": 1}), ("b", {}), ("c", {})]
+    assert parse_tool_calls(None) == () and parse_tool_calls("x") == ()

@@ -15,16 +15,22 @@ import sys
 
 import uvicorn
 
-from jarvis.ai.brain import Brain
 from jarvis.ai.ollama_client import OllamaClient, OllamaError
 from jarvis.api.app import create_app
 from jarvis.config import ConfigError, Settings, load_settings
 from jarvis.logging_setup import setup_logging
+from jarvis.wiring import build_brain, load_user_profile
+
+
+async def terminal_confirm(prompt: str) -> bool:
+    """Ask for approval on the keyboard. The AI cannot press this key for you."""
+    answer = await asyncio.to_thread(input, f"\n  CONFIRM: {prompt} Allow? [y/N] ")
+    return answer.strip().lower() in {"y", "yes"}
 
 
 async def _chat_loop(settings: Settings) -> int:
     client = OllamaClient.from_settings(settings.ollama)
-    brain = Brain(client, max_history_turns=settings.brain.max_history_turns)
+    brain = build_brain(settings, client)
     try:
         status = await client.health()
         if not status.reachable:
@@ -50,7 +56,7 @@ async def _chat_loop(settings: Settings) -> int:
             if not text:
                 continue
             try:
-                print(f"JARVIS: {await brain.respond(text)}")
+                print(f"JARVIS: {await brain.respond(text, confirm=terminal_confirm)}")
             except OllamaError as exc:
                 print(f"JARVIS: I'm afraid I hit a problem. {exc}", file=sys.stderr)
         return 0
@@ -64,18 +70,20 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
     from jarvis.voice.factory import build_voice_stack
     from jarvis.voice.interfaces import VoiceError
 
+    profile = load_user_profile(settings)
     try:
-        stack = build_voice_stack(settings, use_enter=use_enter)
+        # Teach the recogniser the names of your own apps, folders and websites.
+        stack = build_voice_stack(settings, use_enter=use_enter, extra_hints=profile.spoken_names())
     except VoiceError as exc:
         print(f"Voice setup failed: {exc}", file=sys.stderr)
         return 1
 
     client = OllamaClient.from_settings(settings.ollama)
-    brain = Brain(client, max_history_turns=settings.brain.max_history_turns)
+    brain = build_brain(settings, client, profile)
     loop = asyncio.new_event_loop()  # the voice loop is synchronous; the brain is async
 
     def respond(text: str) -> str:
-        return loop.run_until_complete(brain.respond(text))
+        return loop.run_until_complete(brain.respond(text, confirm=terminal_confirm))
 
     labels = {"user": "You", "assistant": "JARVIS", "system": " ··"}
     state_notes = {
@@ -195,6 +203,9 @@ def main(argv: list[str] | None = None) -> int:
             port=settings.api.port,
             log_config=None,
         )
+    except ConfigError as exc:  # e.g. a typo in config/profile.yaml
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
     except KeyboardInterrupt:
         pass
     return 0

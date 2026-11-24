@@ -33,6 +33,7 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "JARVIS_OUTPUT_DEVICE": ("voice", "output_device"),
     "JARVIS_STT_MODEL": ("voice", "stt", "model"),
     "JARVIS_TTS_VOICE": ("voice", "tts", "voice"),
+    "JARVIS_PROFILE": ("tools", "profile_path"),
 }
 
 
@@ -77,6 +78,12 @@ class SttSettings(BaseModel):
             "JARVIS", "Power BI", "VS Code", "Jupyter", "Databricks", "Chrome", "Ollama",
         ]
     )
+    # Whisper often mishears the assistant's name at the start of a sentence.
+    name_aliases: list[str] = Field(
+        default_factory=lambda: [
+            "Travis", "Jervis", "Jarvas", "Javis", "Jarvus", "Jarvice", "Gervais",
+        ]
+    )
 
 
 class TtsSettings(BaseModel):
@@ -98,12 +105,26 @@ class VoiceSettings(BaseModel):
     tts: TtsSettings = Field(default_factory=TtsSettings)
 
 
+class ToolsSettings(BaseModel):
+    enabled: bool = True
+    profile_path: str = "config/profile.yaml"
+    # Tools that must always ask you first, by name (e.g. [open_app]).
+    always_confirm: list[str] = Field(default_factory=list)
+    timeout_seconds: float = Field(10.0, gt=0)
+
+
 class Settings(BaseModel):
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     brain: BrainSettings = Field(default_factory=BrainSettings)
     api: ApiSettings = Field(default_factory=ApiSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    tools: ToolsSettings = Field(default_factory=ToolsSettings)
+
+    def resolve_profile_path(self) -> Path:
+        """Profile file as an absolute path (relative paths are project-relative)."""
+        path = Path(self.tools.profile_path)
+        return path if path.is_absolute() else PROJECT_ROOT / path
 
     def resolve_log_dir(self) -> Path:
         """Log directory as an absolute path (relative paths are project-relative)."""
