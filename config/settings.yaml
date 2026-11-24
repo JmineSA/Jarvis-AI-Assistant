@@ -36,6 +36,24 @@ tools:
   always_confirm: []           # tool names that always ask first, e.g. [open_app, open_website]
   timeout_seconds: 10
 
+memory:                        # Phase 4: SQLite memory and retrieval
+  enabled: true
+  database_path: data/jarvis_memory.db   # relative paths are project-relative
+  max_results: 5               # how many retrieved memories go into the model's context
+  max_context_chars: 1800      # hard limit on the injected memory block
+  recent_turns: 3              # recent messages always included, even on a vague question
+  min_score: 0.35              # below this score a match counts as noise
+  save_conversations: true     # store the conversation itself, not just the facts
+  retention_days: 0            # 0 = keep everything; otherwise delete older messages
+
+ui:                            # Phase 5: the web interface
+  host: 127.0.0.1
+  port: 8501
+  backend: auto                # auto = use the running API when it answers, else run locally
+  api_url: http://127.0.0.1:8000
+  refresh_seconds: 3           # how often the system panel refreshes
+  title: JARVIS
+
 api:
   host: 127.0.0.1              # localhost only
   port: 8000

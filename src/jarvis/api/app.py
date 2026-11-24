@@ -19,7 +19,7 @@ from jarvis.ai.ollama_client import (
 )
 from jarvis.api.routes import router
 from jarvis.config import Settings, load_settings
-from jarvis.wiring import build_brain
+from jarvis.wiring import build_brain, build_memory
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +28,23 @@ def create_app(settings: Settings | None = None, client: OllamaClient | None = N
     """Build the application. `client` can be replaced in tests."""
     settings = settings or load_settings()
     client = client or OllamaClient.from_settings(settings.ollama)
-    brain = build_brain(settings, client)
+    memory = build_memory(settings)
+    brain = build_brain(settings, client, memory=memory)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         logger.info("JARVIS API starting (model: %s).", settings.ollama.model)
         yield
         await client.aclose()
+        if memory is not None:
+            memory.close()
         logger.info("JARVIS API stopped.")
 
     app = FastAPI(title="JARVIS", version=__version__, lifespan=lifespan)
     app.state.settings = settings
     app.state.client = client
     app.state.brain = brain
+    app.state.memory = memory
     app.include_router(router)
 
     def _error(status_code: int):

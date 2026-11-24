@@ -107,9 +107,10 @@ def test_tools_defaults():
     assert Settings().resolve_profile_path().is_absolute()
 
 
-def test_profile_path_env_override():
-    settings = load_settings(env={"JARVIS_PROFILE": "/tmp/other.yaml"})
-    assert str(settings.resolve_profile_path()) == "/tmp/other.yaml"
+def test_profile_path_env_override(tmp_path):
+    absolute = tmp_path / "other.yaml"
+    settings = load_settings(env={"JARVIS_PROFILE": str(absolute)})
+    assert str(settings.resolve_profile_path()) == str(absolute)
 
 
 def test_tools_section_in_yaml(tmp_path):

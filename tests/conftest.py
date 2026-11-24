@@ -5,7 +5,15 @@ from jarvis.config import Settings
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings()
+    """Default settings for tests.
+
+    Memory is switched off so the tests never touch the real database in
+    ``data/``. The tests that exercise memory build their own settings with a
+    temporary database instead.
+    """
+    settings = Settings()
+    settings.memory.enabled = False
+    return settings
 
 
 class FakeClient:

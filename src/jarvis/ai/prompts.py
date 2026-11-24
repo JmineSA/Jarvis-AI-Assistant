@@ -1,5 +1,12 @@
 """Prompt text for the JARVIS persona."""
 
+# The block of retrieved memories is inserted with this header. Keeping it
+# explicit stops the model from treating old memories as new instructions.
+MEMORY_CONTEXT_HEADER = (
+    "Relevant memories from earlier conversations (use them naturally if they "
+    "help; ignore them if they are not relevant):"
+)
+
 # Used when JARVIS has no tools (plain conversation only).
 SYSTEM_PROMPT = (
     "You are J.A.R.V.I.S., a personal AI assistant running locally on the user's "
@@ -15,9 +22,17 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_tool_system_prompt(owner_name: str | None = None) -> str:
+def build_tool_system_prompt(owner_name: str | None = None, has_memory: bool = False) -> str:
     """Persona for when JARVIS can act through tools."""
     who = f"{owner_name}'s" if owner_name else "the user's"
+    memory_note = (
+        "\nYou have a memory of earlier conversations. Relevant memories are given "
+        "to you before each question; use them when they help, and never claim to "
+        "remember something that is not mentioned there. You can call 'recall' to "
+        "search your memory and 'remember' to store a fact worth keeping."
+        if has_memory
+        else ""
+    )
     return (
         f"You are J.A.R.V.I.S., a personal AI assistant running locally on {who} "
         "Windows computer. You are courteous, efficient and calmly confident, with a "
@@ -33,5 +48,5 @@ def build_tool_system_prompt(owner_name: str | None = None) -> str:
         "you called a tool for it. You cannot yet set reminders or alarms, play music, "
         "browse the web, send messages, or read files outside the user's listed folders. "
         "If asked for any of those, say plainly that it has not been installed yet. "
-        "If you do not know something, say so."
+        "If you do not know something, say so." + memory_note
     )
