@@ -1,0 +1,39 @@
+# JARVIS settings. Environment variables (see .env.example) override these values.
+
+ollama:
+  host: http://127.0.0.1:11434
+  model: qwen2.5:3b-instruct   # ~2 GB at Q4; fits in the GTX 970's 4 GB VRAM
+  timeout_seconds: 120
+  temperature: 0.4
+  num_ctx: 4096                # context window; keep modest to stay inside VRAM
+
+brain:
+  max_history_turns: 10        # one turn = one user message + one assistant reply
+
+voice:
+  push_to_talk_key: right_ctrl # hold to talk. Examples: f8, scroll_lock, ctrl+alt+j
+  input_device: 3           # microphone: index or part of its name (see `voice-check`)
+  output_device: null          # speakers: index or part of their name
+  min_speech_seconds: 0.3      # shorter recordings are ignored as accidental taps
+  max_record_seconds: 30
+  silence_peak: 0.01           # quieter than this = "no sound heard"
+  models_dir: data/models
+  stt:
+    model: small.en            # faster but less accurate: base.en
+    language: en
+    compute_type: int8
+    cpu_threads: 4
+    hint_words: [JARVIS, Power BI, VS Code, Jupyter, Databricks, Chrome, Ollama]
+  tts:
+    voice: en_GB-alan-medium   # Piper voice name
+    length_scale: null         # speaking speed: below 1 faster, above 1 slower
+
+api:
+  host: 127.0.0.1              # localhost only
+  port: 8000
+
+logging:
+  level: INFO
+  directory: logs
+  max_bytes: 1048576           # rotate at 1 MB
+  backup_count: 3
