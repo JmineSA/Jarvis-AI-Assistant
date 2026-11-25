@@ -34,9 +34,14 @@ class ToolExecutor:
         self.registry = registry
         self._always_confirm = set(always_confirm)
         self._timeout = timeout
+        self._listeners: list[Callable[[str, ToolResult], None]] = []
 
     def has(self, name: str) -> bool:
         return name in self.registry
+
+    def add_listener(self, listener: Callable[[str, ToolResult], None]) -> None:
+        """Be told about every finished tool request (the dashboard shows these)."""
+        self._listeners.append(listener)
 
     @staticmethod
     def _confirm_prompt(tool: Any, args: Any) -> str:
@@ -49,6 +54,15 @@ class ToolExecutor:
         return f"JARVIS wants to run '{tool.name}'" + (f" ({summary})." if summary else ".")
 
     async def run(self, name: str, arguments: Any, confirm: Confirm | None = None) -> ToolResult:
+        result = await self._run(name, arguments, confirm)
+        for listener in self._listeners:
+            try:
+                listener(name, result)
+            except Exception:
+                logger.exception("Tool listener failed")
+        return result
+
+    async def _run(self, name: str, arguments: Any, confirm: Confirm | None) -> ToolResult:
         tool = self.registry.get(name)
         if tool is None:
             logger.warning("Model asked for unknown tool %r", name)

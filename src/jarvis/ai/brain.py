@@ -98,6 +98,10 @@ class Brain:
         self._lock = asyncio.Lock()  # one turn at a time keeps history consistent
 
     @property
+    def executor(self) -> ToolExecutor | None:
+        return self._executor
+
+    @property
     def history(self) -> list[Message]:
         """A copy of the stored user/assistant messages."""
         return list(self._history)

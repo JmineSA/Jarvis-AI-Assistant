@@ -7,6 +7,7 @@
     python -m jarvis download-models  fetch the speech models in advance
     python -m jarvis memory           see and delete what JARVIS remembers (see the README)
     python -m jarvis add-app NAME     find a program on this PC and add it to your profile
+    python -m jarvis app              the desktop dashboard (voice, chat, memory, system monitor)
 """
 
 from __future__ import annotations
@@ -198,19 +199,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app"],
+        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app", "app"],
         default="serve",
         help="serve: API server | chat: text chat | voice: talk to JARVIS | "
         "voice-check: test microphone, speakers and recognition | "
         "download-models: fetch speech models | "
         "memory: see and delete what JARVIS remembers (list, search, forget, cancel, wipe-history, wipe) | "
-        "add-app: find a program and add it to your profile",
+        "add-app: find a program and add it to your profile | "
+        "app: open the desktop dashboard",
     )
     parser.add_argument(
         "memory_args",
         nargs="*",
         help="for `memory`: list | search WORDS | forget ID | cancel ID | wipe-history | wipe; "
         "for `add-app`: the app name",
+    )
+    parser.add_argument(
+        "--no-voice",
+        action="store_true",
+        help="app only: start the dashboard without loading the microphone and speech models",
     )
     parser.add_argument(
         "--enter",
@@ -247,6 +254,13 @@ def main(argv: list[str] | None = None) -> int:
             return _download_models(settings)
         if args.command == "memory":
             return _run_memory(settings, args.memory_args)
+        if args.command == "app":
+            try:
+                from jarvis.ui.app import run_app
+            except ImportError as exc:
+                print(f"The dashboard needs PySide6 ({exc}). Run: pip install -r requirements.txt", file=sys.stderr)
+                return 1
+            return run_app(settings, use_voice=not args.no_voice)
         if args.command == "add-app":
             from jarvis.appfinder import run_add_app
 

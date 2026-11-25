@@ -122,6 +122,12 @@ class MemorySettings(BaseModel):
     reminder_check_seconds: float = Field(5.0, gt=0)
 
 
+class UiSettings(BaseModel):
+    speak_typed_replies: bool = True   # read replies aloud even when you typed the command
+    weather_refresh_minutes: int = Field(15, ge=1, le=240)
+    health_check_seconds: float = Field(10.0, gt=0)
+
+
 class Settings(BaseModel):
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     brain: BrainSettings = Field(default_factory=BrainSettings)
@@ -130,6 +136,7 @@ class Settings(BaseModel):
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     tools: ToolsSettings = Field(default_factory=ToolsSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    ui: UiSettings = Field(default_factory=UiSettings)
 
     def resolve_database_path(self) -> Path:
         """Memory database as an absolute path (relative paths are project-relative)."""

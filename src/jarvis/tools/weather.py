@@ -185,3 +185,9 @@ def make_weather(
         return ToolResult.done(sentence)
 
     return run
+
+
+def current_chip(data: dict[str, Any]) -> str:
+    """Short text for the dashboard, e.g. "24° Partly cloudy"."""
+    current = data["current"]
+    return f"{round(float(current['temperature_2m']))}° {_describe(current['weather_code']).capitalize()}"

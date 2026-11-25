@@ -12,7 +12,7 @@ brain:
 
 voice:
   push_to_talk_key: right_ctrl # hold to talk. Examples: f8, scroll_lock, ctrl+alt+j
-  input_device: 2            # microphone: your Focusrite input. Find numbers with `voice-check`
+  input_device: 3              # microphone: your Focusrite input. Find numbers with `voice-check`
   output_device: null          # speakers: index or part of their name
   min_speech_seconds: 0.3      # shorter recordings are ignored as accidental taps
   max_record_seconds: 30

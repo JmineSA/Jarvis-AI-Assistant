@@ -180,6 +180,28 @@ python -m jarvis add-app "FL Studio"
 
 It looks in the usual install folders and the Windows list of registered apps (it never runs anything and never scans your whole drive), shows the matches, and asks you to pick one, name it, and add other names you might say. It then adds the entry under `apps:` in `config/profile.yaml`, keeps your comments, and saves a backup as `profile.yaml.bak`. Restart JARVIS and say "open FL Studio". Microsoft Store apps often have no normal `.exe`, so for those add the path by hand.
 
+## The desktop app (Phase 6)
+
+A real Windows window instead of a terminal: Command Center, Conversations, Memory, Tools, Apps and Music, Settings.
+
+```powershell
+pip install -r requirements.txt      # adds PySide6-Essentials, about 70 MB
+python -m jarvis app                 # window + voice (hold Right Ctrl, or tap TALK TO JARVIS)
+python -m jarvis app --no-voice      # window only, type commands
+```
+
+- The window only shows and drives the same brain and tools as before. It adds no new way to act, and anything risky still asks you in a dialog.
+- **Talk button:** tap once to start recording, tap again to send. The Right Ctrl hotkey works exactly as before.
+- **Typed replies are spoken** when voice is running. Turn that off with `ui.speak_typed_replies: false` in `config/settings.yaml`.
+- **Quick commands** are built from your `profile.yaml` (apps, location, music folder, Gmail).
+- **Memory page:** see, add and delete facts, cancel reminders, clear conversations, or erase everything (you must type DELETE).
+- **Apps and Music page:** a red dot means a program or folder isn't found on this PC. Fix the path in `profile.yaml` or run `python -m jarvis add-app "Name"`.
+- **Fonts:** looks best with Orbitron and Inter. Drop the `.ttf` files in `src/jarvis/ui/fonts/`; otherwise Bahnschrift and Segoe UI are used.
+- `JARVIS_REDUCE_MOTION=1` stops the spinning rings and waveform.
+- The GPU gauge reads `nvidia-smi`; it shows n/a if that isn't available.
+
+If you unzip over an existing project, **merge** `config/profile.yaml` instead of overwriting it, so your own apps and paths stay.
+
 ## Test
 
 ```powershell
