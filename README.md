@@ -2,24 +2,22 @@
 
 A modular, local, voice-controlled personal AI assistant for Windows, built step by step.
 
-**Current status: Phase 5 (memory, web interface and system monitoring).**
+**Current status: Phase 4 (voice, tools, and memory with reminders).**
 
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Project skeleton, config, logging, Ollama client, brain, FastAPI `/chat`, tests | Done |
 | 2 | Microphone, Faster-Whisper, Piper TTS, push-to-talk | Built: needs testing on your PC |
 | 3 | Validated tools (open apps and folders, CPU/RAM, date/time, list files) | Built: needs testing on your PC |
-| 4 | SQLite memory, BM25 retrieval into the model's context, `remember`/`recall`/`forget` | Done |
-| 5 | Streamlit web interface, live system monitor, health report | Done |
+| 4 | SQLite memory: facts, past conversations, reminders | Built: needs testing on your PC |
+| 5 | Web UI, status indicators, system monitor | Planned |
 
 ## Architecture in one minute
 
 - `ai/` talks to Ollama and decides what to say. It never touches the operating system.
 - `tools/` is the only code allowed to act on the computer: a fixed registry of typed, validated tools. No arbitrary shell commands. What it may open comes only from `config/profile.yaml`.
-- `memory/` (Phase 4) is the only code that touches SQLite. It stores the conversation and the facts you keep, and finds the ones that matter for the question you just asked.
+- `memory/` is the only code that touches SQLite (`data/jarvis.db`).
 - `voice/` (Phase 2) captures and plays audio.
-- `monitor/` (Phase 5) reads the state of the machine and checks that every part of JARVIS works.
-- `ui/` (Phase 5) is the web interface. It can use the running API server, or run the brain in its own process.
 - `api/` exposes everything over HTTP on localhost.
 
 ## Requirements
@@ -122,70 +120,34 @@ Hold the push-to-talk key and try:
 
 Logs in `logs/jarvis.log` record every tool request and its result.
 
-## Memory (Phase 4)
+## Memory and reminders (Phase 4)
 
-JARVIS keeps a SQLite database in `data/jarvis_memory.db` and reads the relevant parts of it into the model's context **before every question**. It stores two kinds of memory:
-
-- **The conversation.** Every exchange is saved, so a later session can pick up where the last one left off.
-- **Facts.** Short, curated statements you ask it to keep, such as "the LightsOn project lives in D:\Projects\LightsOn".
-
-Retrieval is a small BM25 ranker written in plain Python. It needs no model, no network and no extra dependency, so memory keeps working even when Ollama is down.
-
-Ask it to remember something, or search its memory:
-
-```powershell
-python -m jarvis remember "I work on the LightsOn project" --key "lightson.project"
-python -m jarvis memory "LightsOn"
-python -m jarvis forget 3          # delete one memory by id
-python -m jarvis forget --all      # start afresh
-```
-
-In the terminal chat you can also type `remember <fact>` and `recall <words>` directly.
-
-By voice, three tools do the same thing:
+JARVIS remembers only what you ask it to, plus your past conversations (which you can switch off).
 
 | Say | What happens |
 |---|---|
-| "Remember that I take my coffee black" | The fact is saved with a key of its own |
-| "What do you remember about LightsOn?" | The memory is searched and the answer comes from what was found |
-| "Forget memory 7" | That memory is deleted (you are asked to confirm first) |
+| "Remember that the LightsOn project is due on 1 December" | Saves the fact. It is shown to the model every turn from then on |
+| "What do you know about LightsOn?" / "What do you know about me?" | Reads back matching saved facts and related past conversations |
+| "Forget the LightsOn deadline" | Asks you to confirm (naming the exact fact), then deletes it |
+| "Remind me to call the bank in 20 minutes" | Sets a reminder |
+| "What are my reminders?" / "Cancel the bank reminder" | Lists or cancels |
 
-Facts you store by hand always win over a guessed conversation match, so a corrected detail sticks.
+**Times understood:** "in 20 minutes", "in an hour", "in half an hour", "tomorrow at 9am", "tonight", "this evening", "at 3pm", "at 15:30", "next Monday at 10:30", "1 December", "December 1st at 2pm". A date with no time means 09:00. A bare "at 5" means 5pm (1-7 and 12 are afternoon, 8-11 are morning). If JARVIS isn't sure of the time it asks instead of guessing.
 
-**Memory settings** (`config/settings.yaml`):
+**Reminders are spoken only while JARVIS is running** (voice or chat mode), and only when it is idle, never mid-conversation. A reminder that came due while JARVIS was off is announced on the next start as "I missed a reminder from ...". Each reminder is announced at most once.
 
-| Setting | Meaning |
-|---|---|
-| `memory.enabled` | `false` turns the memory off completely |
-| `memory.database_path` | Where the SQLite file lives (`data/jarvis_memory.db`) |
-| `memory.max_results` | How many retrieved memories go into the model's context |
-| `memory.max_context_chars` | Hard limit on the injected block, so the context window survives |
-| `memory.recent_turns` | Recent messages always included, even when the question matches nothing |
-| `memory.min_score` | Below this score a match counts as noise |
-| `memory.save_conversations` | `false` stores only the facts, not the conversation |
-| `memory.retention_days` | `0` keeps everything; otherwise older messages are deleted |
-
-## The web interface (Phase 5)
+**See and delete everything it holds:**
 
 ```powershell
-python -m jarvis ui
+python -m jarvis memory                  # facts, reminders, conversation totals, database location
+python -m jarvis memory search battery   # search past conversations
+python -m jarvis memory forget 3         # delete one saved fact (the [number] shown by `memory`)
+python -m jarvis memory cancel 2         # cancel one reminder
+python -m jarvis memory wipe-history     # delete stored conversations only
+python -m jarvis memory wipe             # delete EVERYTHING (you must type DELETE)
 ```
 
-This opens http://127.0.0.1:8501. The interface has three parts:
-
-- **The chat**, which is the same brain as the terminal and voice modes. JARVIS answers from what its tools really reported.
-- **The system panel**, which shows the live state of your machine: CPU per core, memory, the GPU (through `nvidia-smi`), network speed and every disk. It refreshes on its own.
-- **The memory browser**, where you can search what JARVIS remembers, add a fact by hand and delete anything it should forget.
-
-The interface uses the running API server when one answers, and runs the brain in its own process when it does not. To force one or the other, set `ui.backend` in `config/settings.yaml` to `api` or `local`.
-
-## Check that everything works (Phase 5)
-
-```powershell
-python -m jarvis status
-```
-
-It prints the health of every part of JARVIS (the model, the memory, the tools, the voice models) and a reading of the machine: CPU, memory, disks, GPU and uptime. The exit code is `0` when everything is healthy.
+**Privacy:** everything stays in `data/jarvis.db` on your PC, which is git-ignored. In `config/settings.yaml` under `memory:` set `save_conversations: false` to keep facts and reminders but stop storing conversations, or `enabled: false` to turn memory off entirely. If the database cannot be opened, JARVIS carries on without memory.
 
 ## Test
 
@@ -206,28 +168,12 @@ Defaults live in `config/settings.yaml`. Environment variables (or a `.env` file
 | `JARVIS_OLLAMA_TIMEOUT` | Seconds to wait for a reply |
 | `JARVIS_API_HOST` / `JARVIS_API_PORT` | Where the API listens (keep the host on `127.0.0.1`) |
 | `JARVIS_LOG_LEVEL` / `JARVIS_LOG_DIR` | Logging |
+| `JARVIS_DB` | Path to the memory database (default `data/jarvis.db`) |
 | `JARVIS_CONFIG` | Path to another settings file |
-| `JARVIS_MEMORY_DB` | Path to the SQLite memory file |
-| `JARVIS_MEMORY_ENABLED` | `false` turns the memory off |
-| `JARVIS_API_URL` | The API server the web interface should use |
 
 Never put secrets in `settings.yaml`; use `.env`, which is git-ignored.
 
 Logs go to the console and to `logs/jarvis.log` (rotating).
-
-## The HTTP API
-
-| Method and path | What it does |
-|---|---|
-| `GET /health` | Is Ollama reachable and is the model installed? |
-| `POST /chat` | Send a message, get a reply |
-| `POST /reset` | Clear the conversation context |
-| `GET /status` | Health of every part of JARVIS plus a reading of the machine |
-| `GET /memory?q=…` | Search the memory (no query returns the newest memories) |
-| `GET /memory/facts` | Every stored fact |
-| `POST /memory/facts` | Store a fact by hand |
-| `DELETE /memory/{id}` | Delete one memory |
-| `POST /memory/clear` | Clear this conversation's messages (the facts stay) |
 
 ## Troubleshooting
 
@@ -244,8 +190,5 @@ Logs go to the console and to `logs/jarvis.log` (rotating).
 | `/chat` or voice gives an HTTP 400 about tools | Your Ollama is too old or the model does not support tools. Update Ollama; `qwen2.5:3b-instruct` supports them. |
 | `/chat` returns 504 | The model is slow. Check `ollama ps` for GPU use, or raise `JARVIS_OLLAMA_TIMEOUT`. |
 | Replies are slow | If `ollama ps` shows CPU, update the NVIDIA driver and restart Ollama. Avoid models above 3B parameters on 4 GB VRAM. |
-| `python -m jarvis ui` says Streamlit is missing | `pip install -r requirements-dev.txt` |
-| The web interface says the backend is offline | Start the API server with `python -m jarvis`, or set `ui.backend: local`. |
-| The system panel shows no GPU | `nvidia-smi` was not found. Install the NVIDIA driver, or ignore the panel: it is decoration, not a requirement. |
-| JARVIS forgets things between sessions | `memory.enabled` is `false`, or `memory.database_path` points somewhere new each run. Check `python -m jarvis status`. |
-| The wrong memory keeps coming back | Delete it in the memory browser, or run `python -m jarvis forget <id>`. |
+| JARVIS says it didn't select a tool when you ask it to remember | Say it shorter: "remember that my project is due on Monday". |
+| A reminder never spoke | JARVIS must be running at that time. Check `python -m jarvis memory` that it was saved with the right time. |

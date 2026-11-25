@@ -74,7 +74,7 @@ websites:
   databricks:
     label: Databricks
     names: [databricks, data bricks]
-    url: 'https://dbc-dd47e974-28f6.cloud.databricks.com/browse?o=1387063559309419'                   # put your workspace address here, e.g. https://adb-123456789.1.azuredatabricks.net
+    url: ''                   # put your workspace address here, e.g. https://adb-123456789.1.azuredatabricks.net
     app: chrome
 
   github:

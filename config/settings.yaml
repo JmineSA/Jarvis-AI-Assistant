@@ -12,23 +12,23 @@ brain:
 
 voice:
   push_to_talk_key: right_ctrl # hold to talk. Examples: f8, scroll_lock, ctrl+alt+j
-  input_device: 3              # microphone: your Focusrite input. Find numbers with `voice-check`
+  input_device: 2              # microphone: your Focusrite input. Find numbers with `voice-check`
   output_device: null          # speakers: index or part of their name
   min_speech_seconds: 0.3      # shorter recordings are ignored as accidental taps
   max_record_seconds: 30
   silence_peak: 0.01           # quieter than this = "no sound heard"
   models_dir: data/models
   stt:
-    model: small.en            # faster but less accurate: base.en
+    model: base.en            # faster but less accurate: base.en
     language: en
     compute_type: int8
-    cpu_threads: 4
+    cpu_threads: 2
     hint_words: [JARVIS, Power BI, VS Code, Jupyter, Databricks, Chrome, Ollama]
     # Mishearings of "JARVIS" at the start of a sentence that are corrected automatically
     name_aliases: [Travis, Jervis, Jarvas, Javis, Jarvus, Jarvice, Gervais]
   tts:
     voice: en_GB-alan-medium   # Piper voice name
-    length_scale: null         # speaking speed: below 1 faster, above 1 slower
+    length_scale: 2      # speaking speed: below 1 faster, above 1 slower
 
 tools:
   enabled: true                # false = JARVIS only talks
@@ -36,23 +36,12 @@ tools:
   always_confirm: []           # tool names that always ask first, e.g. [open_app, open_website]
   timeout_seconds: 10
 
-memory:                        # Phase 4: SQLite memory and retrieval
-  enabled: true
-  database_path: data/jarvis_memory.db   # relative paths are project-relative
-  max_results: 5               # how many retrieved memories go into the model's context
-  max_context_chars: 1800      # hard limit on the injected memory block
-  recent_turns: 3              # recent messages always included, even on a vague question
-  min_score: 0.35              # below this score a match counts as noise
-  save_conversations: true     # store the conversation itself, not just the facts
-  retention_days: 0            # 0 = keep everything; otherwise delete older messages
-
-ui:                            # Phase 5: the web interface
-  host: 127.0.0.1
-  port: 8501
-  backend: auto                # auto = use the running API when it answers, else run locally
-  api_url: http://127.0.0.1:8000
-  refresh_seconds: 3           # how often the system panel refreshes
-  title: JARVIS
+memory:
+  enabled: true                # false = JARVIS forgets everything when it stops
+  database_path: data/jarvis.db  # one local file; nothing leaves your computer
+  save_conversations: true     # false = keep only facts and reminders you ask for
+  max_facts_in_prompt: 20      # how many saved facts the model sees each turn
+  reminder_check_seconds: 5
 
 api:
   host: 127.0.0.1              # localhost only

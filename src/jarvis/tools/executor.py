@@ -38,6 +38,16 @@ class ToolExecutor:
     def has(self, name: str) -> bool:
         return name in self.registry
 
+    @staticmethod
+    def _confirm_prompt(tool: Any, args: Any) -> str:
+        if tool.describe is not None:
+            try:
+                return f"JARVIS wants to {tool.describe(args)}"
+            except Exception:
+                logger.exception("Could not describe %s", tool.name)
+        summary = ", ".join(f"{k}={v}" for k, v in args.model_dump(exclude_none=True).items())
+        return f"JARVIS wants to run '{tool.name}'" + (f" ({summary})." if summary else ".")
+
     async def run(self, name: str, arguments: Any, confirm: Confirm | None = None) -> ToolResult:
         tool = self.registry.get(name)
         if tool is None:
@@ -61,8 +71,7 @@ class ToolExecutor:
             return ToolResult.failed("I didn't understand the details of that request.")
 
         if tool.risk == "confirm" or name in self._always_confirm:
-            summary = ", ".join(f"{k}={v}" for k, v in args.model_dump(exclude_none=True).items())
-            prompt = f"JARVIS wants to run '{name}'" + (f" ({summary})." if summary else ".")
+            prompt = self._confirm_prompt(tool, args)
             approved = False
             if confirm is not None:
                 try:

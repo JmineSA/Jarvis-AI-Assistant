@@ -5,21 +5,14 @@
     python -m jarvis voice            talk to JARVIS (hold the push-to-talk key)
     python -m jarvis voice-check      test microphone, speakers and speech recognition
     python -m jarvis download-models  fetch the speech models in advance
-    python -m jarvis ui               open the web interface in your browser
-    python -m jarvis status           check every part of JARVIS and the machine
-    python -m jarvis memory           search what JARVIS remembers
-    python -m jarvis remember "..."   store a fact without asking the model
-    python -m jarvis forget <id>      delete one stored memory
+    python -m jarvis memory           see and delete what JARVIS remembers (see the README)
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
-import subprocess
 import sys
-from pathlib import Path
 
 import uvicorn
 
@@ -27,7 +20,8 @@ from jarvis.ai.ollama_client import OllamaClient, OllamaError
 from jarvis.api.app import create_app
 from jarvis.config import ConfigError, Settings, load_settings
 from jarvis.logging_setup import setup_logging
-from jarvis.wiring import build_brain, build_memory, load_user_profile
+from jarvis.reminders import ReminderScheduler
+from jarvis.wiring import build_brain, load_user_profile, open_store
 
 
 async def terminal_confirm(prompt: str) -> bool:
@@ -38,8 +32,9 @@ async def terminal_confirm(prompt: str) -> bool:
 
 async def _chat_loop(settings: Settings) -> int:
     client = OllamaClient.from_settings(settings.ollama)
-    memory = build_memory(settings)
-    brain = build_brain(settings, client, memory=memory)
+    store = open_store(settings)
+    brain = build_brain(settings, client, store=store)
+    scheduler = None
     try:
         status = await client.health()
         if not status.reachable:
@@ -49,9 +44,15 @@ async def _chat_loop(settings: Settings) -> int:
             print(status.detail, file=sys.stderr)
             return 1
 
+        if store is not None:
+            scheduler = ReminderScheduler(
+                store,
+                lambda text: print(f"\nJARVIS: {text}", flush=True),
+                interval=settings.memory.reminder_check_seconds,
+            )
+            scheduler.start()
+
         print("JARVIS online. Type 'reset' to clear context, 'exit' to quit.")
-        if memory is not None:
-            print("Type 'remember <fact>' to store something, 'recall <words>' to search.")
         while True:
             try:
                 text = await asyncio.to_thread(input, "You: ")
@@ -66,33 +67,15 @@ async def _chat_loop(settings: Settings) -> int:
                 continue
             if not text:
                 continue
-
-            # Terminal shortcuts for the memory, without waking the model.
-            if memory is not None and text.lower().startswith("remember "):
-                fact = text[len("remember "):].strip()
-                if fact:
-                    _, created = memory.remember_fact(fact, source="user")
-                    print(f"JARVIS: {'Noted.' if created else 'Updated what I had noted.'}")
-                    continue
-            if memory is not None and text.lower().startswith("recall "):
-                query = text[len("recall "):].strip()
-                hits = memory.search(query, limit=5)
-                if not hits:
-                    print("JARVIS: I don't have anything stored about that.")
-                else:
-                    for hit in hits:
-                        print(f"  - {hit.content}")
-                continue
-
             try:
                 print(f"JARVIS: {await brain.respond(text, confirm=terminal_confirm)}")
             except OllamaError as exc:
                 print(f"JARVIS: I'm afraid I hit a problem. {exc}", file=sys.stderr)
         return 0
     finally:
+        if scheduler is not None:
+            scheduler.stop()
         await client.aclose()
-        if memory is not None:
-            memory.close()
 
 
 def _run_voice(settings: Settings, use_enter: bool) -> int:
@@ -110,8 +93,10 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
         return 1
 
     client = OllamaClient.from_settings(settings.ollama)
-    memory = build_memory(settings)
-    brain = build_brain(settings, client, profile, memory=memory)
+    store = open_store(settings)
+    if store is None and settings.memory.enabled:
+        print("Warning: memory is unavailable, so JARVIS will not remember anything.", file=sys.stderr)
+    brain = build_brain(settings, client, profile, store)
     loop = asyncio.new_event_loop()  # the voice loop is synchronous; the brain is async
 
     def respond(text: str) -> str:
@@ -145,6 +130,13 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
         silence_peak=settings.voice.silence_peak,
     )
 
+    # Reminders are spoken between conversations, only while JARVIS is running.
+    scheduler = (
+        ReminderScheduler(store, assistant.say, interval=settings.memory.reminder_check_seconds)
+        if store is not None
+        else None
+    )
+
     try:
         status = loop.run_until_complete(client.health())
         if not (status.reachable and status.model_available):
@@ -154,6 +146,8 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
             f"Hold [{settings.voice.push_to_talk_key}] to talk"
         )
         print(f"JARVIS voice mode. {how}. Press Ctrl+C to quit.")
+        if scheduler is not None:
+            scheduler.start()
         assistant.run()
         return 0
     except VoiceError as exc:
@@ -163,11 +157,23 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
         print("\nJARVIS offline.")
         return 0
     finally:
+        if scheduler is not None:
+            scheduler.stop()
         assistant.stop()
         loop.run_until_complete(client.aclose())
         loop.close()
-        if memory is not None:
-            memory.close()
+
+
+def _run_memory(settings: Settings, args: list[str]) -> int:
+    """See and delete what JARVIS remembers."""
+    from jarvis.memory.cli import run_memory_cli
+
+    store = open_store(settings)
+    if store is None:
+        print("Memory is switched off or its database cannot be opened (see logs/jarvis.log).",
+              file=sys.stderr)
+        return 1
+    return run_memory_cli(store, args)
 
 
 def _download_models(settings: Settings) -> int:
@@ -186,201 +192,27 @@ def _download_models(settings: Settings) -> int:
     return 0
 
 
-def _run_ui(settings: Settings) -> int:
-    """Start the web interface (Streamlit) and open it in the browser."""
-    app = Path(__file__).resolve().parent / "ui" / "streamlit_app.py"
-    if not app.exists():  # pragma: no cover - the file ships with the package
-        print(f"The web interface is missing: {app}", file=sys.stderr)
-        return 1
-
-    project_root = Path(__file__).resolve().parents[2]
-    env = dict(os.environ)
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = f"{project_root / 'src'}{';' if existing else ''}{existing}"
-
-    command = [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        str(app),
-        "--server.port",
-        str(settings.ui.port),
-        "--server.address",
-        settings.ui.host,
-        "--server.headless",
-        "true",
-        "--browser.gatherUsageStats",
-        "false",
-    ]
-    print(f"Opening the web interface on http://{settings.ui.host}:{settings.ui.port}")
-    print("Press Ctrl+C to stop it.")
-    try:
-        return subprocess.call(command, env=env)
-    except FileNotFoundError:
-        print("Streamlit is not installed. Run: pip install streamlit", file=sys.stderr)
-        return 1
-    except KeyboardInterrupt:
-        return 0
-
-
-async def _run_status(settings: Settings) -> int:
-    """Print the health of every part of JARVIS and the state of the machine."""
-    from jarvis.monitor.health import collect_health
-    from jarvis.monitor.system import SystemMonitor
-
-    client = OllamaClient.from_settings(settings.ollama)
-    memory = build_memory(settings)
-    brain = build_brain(settings, client, memory=memory)
-    try:
-        report = await collect_health(
-            settings, client, brain=brain, memory=memory, monitor=SystemMonitor()
-        )
-    finally:
-        await client.aclose()
-        if memory is not None:
-            memory.close()
-
-    print(f"JARVIS status: {report.status.upper()}")
-    print()
-    print(report.summary())
-    print()
-    snapshot = report.snapshot
-    if snapshot is not None:
-        print(f"CPU        {snapshot.cpu_percent:.0f}% over {snapshot.cpu_count} cores")
-        print(
-            f"Memory     {snapshot.memory_used_gb:.1f} / {snapshot.memory_total_gb:.1f} GB "
-            f"({snapshot.memory_percent:.0f}%)"
-        )
-        for disk in snapshot.disks[:3]:
-            print(
-                f"Disk       {disk.mount} {disk.percent:.0f}% "
-                f"({disk.used_gb:.1f} / {disk.total_gb:.1f} GB)"
-            )
-        for gpu in snapshot.gpu:
-            print(
-                f"GPU        {gpu.name} {gpu.utilization_percent:.0f}% "
-                f"({gpu.memory_used_mb:.0f} / {gpu.memory_total_mb:.0f} MB)"
-            )
-        print(f"Uptime     {snapshot.uptime_human}")
-    print()
-    print(f"Model      {settings.ollama.model}")
-    print(f"API        http://{settings.api.host}:{settings.api.port}")
-    print(f"Interface  http://{settings.ui.host}:{settings.ui.port}")
-    return 0 if report.ok else 1
-
-
-def _run_memory(settings: Settings, query: str, limit: int) -> int:
-    """Search the memory and print what was found."""
-    memory = build_memory(settings)
-    if memory is None:
-        print("Memory is switched off.", file=sys.stderr)
-        return 1
-    try:
-        hits = memory.search(query, limit=limit) if query else memory.recent_messages(limit=limit)
-        stats = memory.stats()
-        print(f"{stats.messages} messages, {stats.facts} facts, {stats.size_bytes} bytes.")
-        print()
-        if not hits:
-            print("Nothing found.")
-            return 0
-        for hit in hits:
-            print(f"#{hit.id} [{hit.kind}] {hit.date_label}  score {hit.score:.2f}")
-            print(f"    {hit.content}")
-        return 0
-    finally:
-        memory.close()
-
-
-def _run_remember(settings: Settings, fact: str, key: str | None) -> int:
-    """Store a fact without involving the model."""
-    memory = build_memory(settings)
-    if memory is None:
-        print("Memory is switched off.", file=sys.stderr)
-        return 1
-    try:
-        memory_id, created = memory.remember_fact(fact, key, source="user")
-        verb = "Remembered" if created else "Updated"
-        print(f"{verb} #{memory_id}.")
-        return 0
-    finally:
-        memory.close()
-
-
-def _run_forget(settings: Settings, memory_id: int, wipe_all: bool = False) -> int:
-    """Delete one stored memory, or every memory."""
-    memory = build_memory(settings)
-    if memory is None:
-        print("Memory is switched off.", file=sys.stderr)
-        return 1
-    try:
-        if wipe_all:
-            deleted = memory.clear_all()
-            print(f"Deleted {deleted} memories. JARVIS will start afresh.")
-            return 0
-        hit = memory.get(memory_id)
-        if hit is None:
-            print(f"No memory with id {memory_id}.", file=sys.stderr)
-            return 1
-        if memory.forget(memory_id):
-            print(f"Deleted #{memory_id}: {hit.content}")
-            return 0
-        print("Could not delete that memory.", file=sys.stderr)
-        return 1
-    finally:
-        memory.close()
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="jarvis", description="JARVIS personal assistant")
     parser.add_argument(
         "command",
         nargs="?",
-        choices=[
-            "serve",
-            "chat",
-            "voice",
-            "voice-check",
-            "download-models",
-            "ui",
-            "status",
-            "memory",
-            "remember",
-            "forget",
-        ],
+        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory"],
         default="serve",
         help="serve: API server | chat: text chat | voice: talk to JARVIS | "
         "voice-check: test microphone, speakers and recognition | "
-        "download-models: fetch speech models | ui: web interface | "
-        "status: check JARVIS and the machine | memory: search the memory | "
-        "remember: store a fact | forget: delete a memory",
+        "download-models: fetch speech models | "
+        "memory: see and delete what JARVIS remembers (list, search, forget, cancel, wipe-history, wipe)",
+    )
+    parser.add_argument(
+        "memory_args",
+        nargs="*",
+        help="for `memory`: list | search WORDS | forget ID | cancel ID | wipe-history | wipe",
     )
     parser.add_argument(
         "--enter",
         action="store_true",
         help="voice mode only: press Enter to start/stop talking instead of the push-to-talk key",
-    )
-    parser.add_argument(
-        "text",
-        nargs="*",
-        help="memory mode: what to search for | remember mode: the fact to store | "
-        "forget mode: the id to delete",
-    )
-    parser.add_argument(
-        "--key",
-        default=None,
-        help="remember mode only: a short name for the fact, e.g. user.dog.name",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=20,
-        help="memory mode only: how many memories to show (default 20)",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="forget mode only: delete every memory, not just one id",
     )
     args = parser.parse_args(argv)
 
@@ -410,30 +242,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_voice_check(settings)
         if args.command == "download-models":
             return _download_models(settings)
-        if args.command == "ui":
-            return _run_ui(settings)
-        if args.command == "status":
-            return asyncio.run(_run_status(settings))
         if args.command == "memory":
-            return _run_memory(settings, " ".join(args.text).strip(), args.limit)
-        if args.command == "remember":
-            fact = " ".join(args.text).strip()
-            if not fact:
-                print("Tell me what to remember.", file=sys.stderr)
-                return 2
-            return _run_remember(settings, fact, args.key)
-        if args.command == "forget":
-            if args.all:
-                return _run_forget(settings, 0, wipe_all=True)
-            if not args.text:
-                print("Give me the id of the memory to delete.", file=sys.stderr)
-                return 2
-            try:
-                memory_id = int(args.text[0])
-            except ValueError:
-                print("The id must be a number.", file=sys.stderr)
-                return 2
-            return _run_forget(settings, memory_id)
+            return _run_memory(settings, args.memory_args)
         # log_config=None lets uvicorn's logs flow through our logging setup.
         uvicorn.run(
             create_app(settings),

@@ -107,10 +107,9 @@ def test_tools_defaults():
     assert Settings().resolve_profile_path().is_absolute()
 
 
-def test_profile_path_env_override(tmp_path):
-    absolute = tmp_path / "other.yaml"
-    settings = load_settings(env={"JARVIS_PROFILE": str(absolute)})
-    assert str(settings.resolve_profile_path()) == str(absolute)
+def test_profile_path_env_override():
+    settings = load_settings(env={"JARVIS_PROFILE": "/tmp/other.yaml"})
+    assert str(settings.resolve_profile_path()) == "/tmp/other.yaml"
 
 
 def test_tools_section_in_yaml(tmp_path):
@@ -124,3 +123,15 @@ def test_shipped_settings_target_the_focusrite_mic_and_name_fix():
     settings = load_settings(env={})
     assert settings.voice.input_device == 3
     assert "Travis" in settings.voice.stt.name_aliases
+
+
+def test_memory_defaults():
+    memory = Settings().memory
+    assert memory.enabled is True and memory.save_conversations is True
+    assert memory.database_path == "data/jarvis.db"
+    assert Settings().resolve_database_path().is_absolute()
+
+
+def test_database_path_env_override():
+    settings = load_settings(env={"JARVIS_DB": "/tmp/elsewhere.db"})
+    assert str(settings.resolve_database_path()) == "/tmp/elsewhere.db"

@@ -60,8 +60,12 @@ class Trigger(Protocol):
 
     def close(self) -> None: ...
 
-    def wait_for_press(self, stop: threading.Event) -> bool:
-        """Block until the user starts talking. Return False if `stop` was set."""
+    def wait_for_press(self, stop: threading.Event, timeout: float | None = None) -> bool | None:
+        """Block until the user starts talking.
+
+        Returns True when pressed, False if `stop` was set, and None if `timeout`
+        seconds passed with neither (so the caller can do other work and call again).
+        """
 
     def wait_for_release(self, stop: threading.Event, timeout: float | None = None) -> None:
         """Block until the user stops talking, `stop` is set, or `timeout` passes."""

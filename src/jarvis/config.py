@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from dotenv import load_dotenv
@@ -34,9 +34,7 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "JARVIS_STT_MODEL": ("voice", "stt", "model"),
     "JARVIS_TTS_VOICE": ("voice", "tts", "voice"),
     "JARVIS_PROFILE": ("tools", "profile_path"),
-    "JARVIS_MEMORY_DB": ("memory", "database_path"),
-    "JARVIS_MEMORY_ENABLED": ("memory", "enabled"),
-    "JARVIS_API_URL": ("ui", "api_url"),
+    "JARVIS_DB": ("memory", "database_path"),
 }
 
 
@@ -117,35 +115,11 @@ class ToolsSettings(BaseModel):
 
 
 class MemorySettings(BaseModel):
-    """The SQLite memory (Phase 4)."""
-
     enabled: bool = True
-    database_path: str = "data/jarvis_memory.db"
-    # How many retrieved memories go into the model's context per turn.
-    max_results: int = Field(5, ge=1, le=25)
-    # Hard limit on the injected memory block, so the context window survives.
-    max_context_chars: int = Field(1800, ge=200, le=20000)
-    # Recent messages always included, even when the query matches nothing.
-    recent_turns: int = Field(3, ge=0, le=20)
-    # Hits below this score are treated as noise.
-    min_score: float = Field(0.35, ge=0)
-    # Store the conversation itself, not just the facts.
-    save_conversations: bool = True
-    # Delete messages older than this many days. 0 keeps everything.
-    retention_days: int = Field(0, ge=0)
-
-
-class UiSettings(BaseModel):
-    """The web interface (Phase 5)."""
-
-    host: str = "127.0.0.1"
-    port: int = Field(8501, ge=1, le=65535)
-    # "auto" uses the running API when it answers, otherwise the local brain.
-    backend: Literal["auto", "api", "local"] = "auto"
-    api_url: str = "http://127.0.0.1:8000"
-    # How often the system panel refreshes, in seconds.
-    refresh_seconds: float = Field(3.0, ge=0.5, le=300)
-    title: str = "JARVIS"
+    database_path: str = "data/jarvis.db"
+    save_conversations: bool = True       # false = remember facts and reminders only
+    max_facts_in_prompt: int = Field(20, ge=0, le=100)
+    reminder_check_seconds: float = Field(5.0, gt=0)
 
 
 class Settings(BaseModel):
@@ -156,7 +130,11 @@ class Settings(BaseModel):
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     tools: ToolsSettings = Field(default_factory=ToolsSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
-    ui: UiSettings = Field(default_factory=UiSettings)
+
+    def resolve_database_path(self) -> Path:
+        """Memory database as an absolute path (relative paths are project-relative)."""
+        path = Path(self.memory.database_path)
+        return path if path.is_absolute() else PROJECT_ROOT / path
 
     def resolve_profile_path(self) -> Path:
         """Profile file as an absolute path (relative paths are project-relative)."""
@@ -171,11 +149,6 @@ class Settings(BaseModel):
     def resolve_models_dir(self) -> Path:
         """Where downloaded voice and speech models are kept."""
         path = Path(self.voice.models_dir)
-        return path if path.is_absolute() else PROJECT_ROOT / path
-
-    def resolve_memory_path(self) -> Path:
-        """The SQLite memory file as an absolute path."""
-        path = Path(self.memory.database_path)
         return path if path.is_absolute() else PROJECT_ROOT / path
 
 

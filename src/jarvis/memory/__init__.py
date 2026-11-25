@@ -1,22 +1,5 @@
-"""JARVIS's memory: SQLite conversation history and curated facts (Phase 4)."""
+"""SQLite memory: conversations, facts you asked JARVIS to remember, and reminders."""
 
-from jarvis.memory.db import MemoryDatabase, utc_now
-from jarvis.memory.store import (
-    MemoryHit,
-    MemoryStats,
-    MemoryStore,
-    hits_to_dicts,
-    slugify,
-    tokenize,
-)
+from jarvis.memory.store import Fact, MemoryStore, Reminder, StoredMessage
 
-__all__ = [
-    "MemoryDatabase",
-    "MemoryHit",
-    "MemoryStats",
-    "MemoryStore",
-    "hits_to_dicts",
-    "slugify",
-    "tokenize",
-    "utc_now",
-]
+__all__ = ["Fact", "MemoryStore", "Reminder", "StoredMessage"]

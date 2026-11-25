@@ -206,11 +206,15 @@ class HotkeyTrigger:
             self._listener.stop()
             self._listener = None
 
-    def wait_for_press(self, stop: threading.Event) -> bool:
+    def wait_for_press(self, stop: threading.Event, timeout: float | None = None) -> bool | None:
+        deadline = None if timeout is None else time.monotonic() + timeout
         while not stop.is_set():
-            if self._pressed.wait(0.1):
+            pause = 0.1 if deadline is None else min(0.1, max(0.0, deadline - time.monotonic()))
+            if self._pressed.wait(pause):
                 self._pressed.clear()
                 return True
+            if deadline is not None and time.monotonic() >= deadline:
+                return None
         return False
 
     def wait_for_release(self, stop: threading.Event, timeout: float | None = None) -> None:
@@ -239,7 +243,8 @@ class EnterTrigger:
     def close(self) -> None:
         pass
 
-    def wait_for_press(self, stop: threading.Event) -> bool:
+    def wait_for_press(self, stop: threading.Event, timeout: float | None = None) -> bool | None:
+        # Blocks on the keyboard, so reminders are only spoken between turns in this test mode.
         try:
             input("\n[Press Enter, then speak] ")
         except EOFError:

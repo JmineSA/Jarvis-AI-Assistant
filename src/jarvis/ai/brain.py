@@ -5,11 +5,6 @@ When tools are available the model may ask for one; the brain hands the request
 to the executor and answers from the tool's real result, never from the model's
 own claim of what it did. The brain only *reasons*: it never touches the
 operating system itself.
-
-When a memory store is attached, the brain also does the Phase 4 job: before
-each turn it searches the store for memories that match what was just said and
-injects them into the model's context, then writes the finished exchange back
-into the store.
 """
 
 from __future__ import annotations
@@ -18,10 +13,13 @@ import asyncio
 import json
 import logging
 import re
+import sqlite3
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from jarvis.ai.ollama_client import ChatResult, OllamaResponseError, ToolCall
-from jarvis.ai.prompts import MEMORY_CONTEXT_HEADER, SYSTEM_PROMPT
+from jarvis.ai.prompts import SYSTEM_PROMPT
+from jarvis.memory.store import MemoryStore
 from jarvis.tools.executor import Confirm, ToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -37,9 +35,17 @@ _FALSE_ACTION_CLAIM = re.compile(
     r"(?:opened|opening|launched|launching)\b",
     re.IGNORECASE,
 )
+# Likewise "I'll remember that" or "Reminder set" when no memory tool ran.
+_FALSE_MEMORY_CLAIM = re.compile(
+    r"^\W*(?:(?:sure|certainly|of course|absolutely|okay|ok)\W+)?"
+    r"(?:i(?:'ll| will|'ve| have)\s+(?:remember|note|noted|save|saved|store|stored|remind|set a reminder)\b"
+    r"|noted\b|reminder (?:set|is set)\b)",
+    re.IGNORECASE,
+)
 NO_TOOL_CHOSEN = (
     "I haven't actually done that, because I didn't select any of my tools. "
-    "Please say it again, for example: open VS Code."
+    "Please say it again, a little shorter, for example: open VS Code, "
+    "or: remember that my project is due on Monday."
 )
 
 
@@ -49,18 +55,6 @@ class ChatClient(Protocol):
     async def chat_with_tools(
         self, messages: list[Message], tools: list[dict[str, Any]]
     ) -> ChatResult: ...
-
-
-class MemoryLike(Protocol):
-    """The part of the memory store the brain needs.
-
-    Keeping it a protocol means the brain can be tested with a small stub and
-    the memory package stays free of any dependency on the AI layer.
-    """
-
-    def context_for(self, query: str) -> str: ...
-
-    def remember_turn(self, user_text: str, assistant_text: str) -> None: ...
 
 
 def _calls_from_text(content: str, executor: ToolExecutor) -> list[ToolCall]:
@@ -87,7 +81,9 @@ class Brain:
         system_prompt: str = SYSTEM_PROMPT,
         max_history_turns: int = 10,
         executor: ToolExecutor | None = None,
-        memory: MemoryLike | None = None,
+        context: Callable[[], str] | None = None,
+        memory: MemoryStore | None = None,
+        session_id: str = "",
     ) -> None:
         if max_history_turns < 1:
             raise ValueError("max_history_turns must be at least 1")
@@ -95,7 +91,9 @@ class Brain:
         self._system_prompt = system_prompt
         self._max_messages = max_history_turns * 2
         self._executor = executor
-        self._memory = memory
+        self._context = context      # extra system text each turn (date, saved facts)
+        self._memory = memory        # where finished turns are saved
+        self._session_id = session_id
         self._history: list[Message] = []
         self._lock = asyncio.Lock()  # one turn at a time keeps history consistent
 
@@ -107,10 +105,6 @@ class Brain:
     @property
     def history_length(self) -> int:
         return len(self._history)
-
-    @property
-    def has_memory(self) -> bool:
-        return self._memory is not None
 
     def reset(self) -> None:
         self._history.clear()
@@ -130,8 +124,7 @@ class Brain:
         async with self._lock:
             user_message: Message = {"role": "user", "content": text}
             messages = [
-                {"role": "system", "content": self._system_prompt},
-                *self._memory_messages(text),
+                {"role": "system", "content": self._system_text()},
                 *self._history,
                 user_message,
             ]
@@ -142,41 +135,30 @@ class Brain:
 
             self._history.extend([user_message, {"role": "assistant", "content": reply}])
             self._trim()
-            self._remember_turn(text, reply)
+            self._save_turn(text, reply)
             logger.info("Turn complete (history: %d messages).", len(self._history))
             return reply
 
-    def _memory_messages(self, query: str) -> list[Message]:
-        """The retrieved memories, as a message for the model.
-
-        A failure to read the memory must never stop the conversation, so any
-        error here is logged and the turn continues without memories.
-        """
-        if self._memory is None:
-            return []
+    def _system_text(self) -> str:
+        """The system prompt plus live context (the date and what you asked it to remember)."""
+        if self._context is None:
+            return self._system_prompt
         try:
-            context = self._memory.context_for(query)
+            extra = self._context()
         except Exception:
-            logger.exception("Memory retrieval failed; continuing without memories.")
-            return []
-        if not context or not context.strip():
-            return []
-        logger.info("Injected %d characters of memory into the context.", len(context))
-        return [
-            {
-                "role": "system",
-                "content": f"{MEMORY_CONTEXT_HEADER}\n{context.strip()}",
-            }
-        ]
+            logger.exception("Could not build the memory context")
+            return self._system_prompt
+        return f"{self._system_prompt}\n\n{extra}" if extra else self._system_prompt
 
-    def _remember_turn(self, user_text: str, reply: str) -> None:
-        """Write the finished exchange into the memory store."""
+    def _save_turn(self, user_text: str, reply: str) -> None:
+        """Keep the exchange in long-term memory. Memory trouble never breaks a conversation."""
         if self._memory is None:
             return
         try:
-            self._memory.remember_turn(user_text, reply)
-        except Exception:
-            logger.exception("Could not save this turn to memory.")
+            self._memory.add_message(self._session_id, "user", user_text)
+            self._memory.add_message(self._session_id, "assistant", reply)
+        except (sqlite3.Error, OSError):
+            logger.exception("Could not save the conversation to memory")
 
     async def _respond_with_tools(
         self, messages: list[Message], executor: ToolExecutor, confirm: Confirm | None
@@ -188,7 +170,7 @@ class Brain:
             reply = result.content.strip()
             if not reply:
                 raise OllamaResponseError("Ollama returned an empty reply.")
-            if _FALSE_ACTION_CLAIM.match(reply):
+            if _FALSE_ACTION_CLAIM.match(reply) or _FALSE_MEMORY_CLAIM.match(reply):
                 logger.warning("Model claimed an action without calling a tool: %r", reply)
                 return NO_TOOL_CHOSEN
             return reply

@@ -53,6 +53,8 @@ class Tool:
     args_model: type[ToolArgs]          # what we actually validate against
     run: Callable[[Any], ToolResult]
     risk: Literal["safe", "confirm"] = "safe"
+    # Plain-words description of what this call will do, shown when asking you to confirm.
+    describe: Callable[[Any], str] | None = None
 
 
 class ToolRegistry:
