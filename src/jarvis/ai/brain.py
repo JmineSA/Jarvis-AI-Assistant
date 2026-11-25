@@ -32,7 +32,7 @@ MAX_TOOL_CALLS_PER_TURN = 3
 _FALSE_ACTION_CLAIM = re.compile(
     r"^\W*(?:(?:sure|certainly|of course|absolutely|okay|ok)\W+)?"
     r"(?:(?:i(?:'ve| have|'m| am| will|'ll)|i)\s+)?(?:now\s+)?"
-    r"(?:opened|opening|launched|launching)\b",
+    r"(?:opened|opening|launched|launching|searching|playing|composing|drafting)\b",
     re.IGNORECASE,
 )
 # Likewise "I'll remember that" or "Reminder set" when no memory tool ran.

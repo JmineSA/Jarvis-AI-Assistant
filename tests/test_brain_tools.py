@@ -13,7 +13,7 @@ from jarvis.wiring import build_brain
 
 
 def make_brain(client, always_confirm=()):
-    registry = build_registry(Profile())  # system_status + current_time only
+    registry = build_registry(Profile())  # profile-free tools only
     executor = ToolExecutor(registry, always_confirm=always_confirm)
     return Brain(client, "system prompt", executor=executor)
 
@@ -31,7 +31,7 @@ async def test_tools_are_offered_to_the_model(fake_client_cls):
     client = fake_client_cls(["Hello."])
     await make_brain(client).respond("hi")
     names = [t["function"]["name"] for t in client.tools_offered]
-    assert names == ["system_status", "current_time"]
+    assert names == ["web_search", "compose_email", "system_status", "current_time"]
 
 
 async def test_plain_conversation_needs_no_tool(fake_client_cls):

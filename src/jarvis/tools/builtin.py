@@ -32,8 +32,16 @@ from jarvis.tools.memory_tools import (
     make_remember,
     make_set_reminder,
 )
+from jarvis.tools.media import PlayMediaArgs, make_play_media
 from jarvis.tools.registry import Tool, ToolRegistry
 from jarvis.tools.system import NoArgs, make_current_time, make_system_status
+from jarvis.tools.weather import WeatherArgs, make_weather
+from jarvis.tools.web import (
+    ComposeEmailArgs,
+    WebSearchArgs,
+    make_compose_email,
+    make_web_search,
+)
 
 
 def _name_property(profile: Profile, kind: Kind, what: str) -> dict[str, Any]:
@@ -214,6 +222,76 @@ def build_registry(
             )
         )
 
+    registry.register(
+        Tool(
+            name="web_search",
+            description="Search Google, YouTube or YouTube Music. Opens the results in the browser.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": _text_property("What to search for, e.g. 'best current action movies'"),
+                    "site": {
+                        "type": "string",
+                        "enum": ["google", "youtube", "youtube_music"],
+                        "description": "Where to search. Use google unless the user names YouTube or YouTube Music.",
+                    },
+                },
+                "required": ["query"],
+            },
+            args_model=WebSearchArgs,
+            run=make_web_search(profile, launcher),
+        )
+    )
+    registry.register(
+        Tool(
+            name="compose_email",
+            description="Open a Gmail draft for the user to read and send. It never sends anything.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "to": _text_property("Who it is for: a saved contact name or an email address"),
+                    "subject": _text_property("The subject line"),
+                    "body": _text_property("The message text"),
+                },
+            },
+            args_model=ComposeEmailArgs,
+            run=make_compose_email(profile, launcher),
+        )
+    )
+    if profile.music.folder:
+        registry.register(
+            Tool(
+                name="play_media",
+                description="Play an album or song from the user's music folder in the media player.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "name": _text_property(
+                            "The album, artist or song, e.g. 'Kendrick Lamar GNX'. Leave empty to play the whole music folder."
+                        )
+                    },
+                },
+                args_model=PlayMediaArgs,
+                run=make_play_media(profile, launcher),
+            )
+        )
+    if profile.location is not None:
+        registry.register(
+            Tool(
+                name="weather",
+                description="Get the weather forecast for the user's home city, now or at a time.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "when": _text_property(
+                            "When, exactly as the user said it: 'today', 'tomorrow', 'at 2pm', 'Friday'. Leave empty for right now."
+                        )
+                    },
+                },
+                args_model=WeatherArgs,
+                run=make_weather(profile.location, clock),
+            )
+        )
     registry.register(
         Tool(
             name="system_status",

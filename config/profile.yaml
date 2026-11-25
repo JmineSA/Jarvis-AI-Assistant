@@ -6,6 +6,25 @@
 
 owner_name: Lesiba
 
+# Where you are, for the weather. Only these coordinates are sent to the weather service.
+location:
+  name: Pretoria
+  latitude: -25.7479
+  longitude: 28.2293
+
+# Your music: "play <album> in VLC" searches this folder (albums can be one or two levels down).
+music:
+  # PLACEHOLDER: change this to the real path of your music folder.
+  folder: 'G:\Music'
+  player: vlc               # the key of an app below
+
+# Saved contacts for "write an email to <name>". JARVIS only opens a Gmail draft; you press send.
+# contacts:
+#   mum:
+#     label: Mum
+#     names: [mother, mom]
+#     email: mum@example.com
+
 apps:
   vscode:
     label: VS Code
@@ -40,6 +59,23 @@ apps:
     args: [lab]
     folder_mode: cwd          # "open Jupyter in LightsOn" starts it inside that folder
 
+  vlc:
+    label: VLC
+    names: [vlc media player, media player, v l c]
+    candidates:
+      - 'C:\Program Files\VideoLAN\VLC\vlc.exe'
+      - 'C:\Program Files (x86)\VideoLAN\VLC\vlc.exe'
+      - vlc
+
+  flstudio:
+    label: FL Studio
+    names: [fl studio, fl, fruity loops, fruity loops studio, f l studio]
+    # The folder name changes with the version. If JARVIS can't find it, run:
+    #   python -m jarvis add-app "FL Studio"
+    candidates:
+      - 'C:\Program Files\Image-Line\FL Studio 2026\FL64.exe'
+      - FL64
+
 folders:
   portfolio:
     label: portfolio
@@ -70,6 +106,11 @@ folders:
     label: Documents
     path: '%USERPROFILE%\Documents'
 
+  music:
+    label: Music
+    names: [my music, music folder, songs]
+    path: 'G:\Music'         # PLACEHOLDER: same as `music: folder` above
+
 websites:
   databricks:
     label: Databricks
@@ -81,4 +122,22 @@ websites:
     label: GitHub
     names: [my github, git hub]
     url: https://github.com/JmineSA
+    app: chrome
+
+  gmail:
+    label: Gmail
+    names: [email, my email, emails, mail, inbox, my inbox, g mail]
+    url: https://mail.google.com
+    app: chrome
+
+  youtube:
+    label: YouTube
+    names: [you tube]
+    url: https://www.youtube.com
+    app: chrome
+
+  youtubemusic:
+    label: YouTube Music
+    names: [you tube music, yt music, music streaming]
+    url: https://music.youtube.com
     app: chrome

@@ -21,7 +21,7 @@ from jarvis.config import ConfigError
 
 logger = logging.getLogger(__name__)
 
-Kind = Literal["apps", "folders", "websites"]
+Kind = Literal["apps", "folders", "websites", "contacts"]
 
 # Words people add when speaking ("open the VS Code app", "my portfolio folder").
 _FILLER = {"the", "a", "my", "please", "app", "application", "program", "folder", "directory",
@@ -63,11 +63,33 @@ class SiteEntry(BaseModel):
     app: str | None = None  # key of an app to open it with, e.g. chrome
 
 
+class ContactEntry(BaseModel):
+    label: str | None = None
+    names: list[str] = Field(default_factory=list)
+    email: str
+
+
+class Location(BaseModel):
+    """Where you are, for the weather. Coordinates are sent to the weather service, nothing else."""
+
+    name: str
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class MusicEntry(BaseModel):
+    folder: str = ""         # the folder that holds your albums
+    player: str = "vlc"      # key of the app (under `apps`) that plays them
+
+
 class Profile(BaseModel):
     owner_name: str | None = None
+    location: Location | None = None
+    music: MusicEntry = Field(default_factory=MusicEntry)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     folders: dict[str, FolderEntry] = Field(default_factory=dict)
     websites: dict[str, SiteEntry] = Field(default_factory=dict)
+    contacts: dict[str, ContactEntry] = Field(default_factory=dict)
 
     def _entries(self, kind: Kind) -> dict:
         return getattr(self, kind)
@@ -95,7 +117,7 @@ class Profile(BaseModel):
     def spoken_names(self) -> list[str]:
         """Names to hint to the speech recogniser so it hears them correctly."""
         names: list[str] = []
-        for kind in ("apps", "folders", "websites"):
+        for kind in ("apps", "folders", "websites", "contacts"):
             for key, entry in self._entries(kind).items():  # type: ignore[arg-type]
                 names.append(entry.label or key)
         return list(dict.fromkeys(names))

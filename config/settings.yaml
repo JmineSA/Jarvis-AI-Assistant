@@ -12,23 +12,23 @@ brain:
 
 voice:
   push_to_talk_key: right_ctrl # hold to talk. Examples: f8, scroll_lock, ctrl+alt+j
-  input_device: 2              # microphone: your Focusrite input. Find numbers with `voice-check`
+  input_device: 2            # microphone: your Focusrite input. Find numbers with `voice-check`
   output_device: null          # speakers: index or part of their name
   min_speech_seconds: 0.3      # shorter recordings are ignored as accidental taps
   max_record_seconds: 30
   silence_peak: 0.01           # quieter than this = "no sound heard"
   models_dir: data/models
   stt:
-    model: base.en            # faster but less accurate: base.en
+    model: small.en            # faster but less accurate: base.en
     language: en
     compute_type: int8
-    cpu_threads: 2
+    cpu_threads: 4
     hint_words: [JARVIS, Power BI, VS Code, Jupyter, Databricks, Chrome, Ollama]
     # Mishearings of "JARVIS" at the start of a sentence that are corrected automatically
     name_aliases: [Travis, Jervis, Jarvas, Javis, Jarvus, Jarvice, Gervais]
   tts:
     voice: en_GB-alan-medium   # Piper voice name
-    length_scale: 2      # speaking speed: below 1 faster, above 1 slower
+    length_scale: null         # speaking speed: below 1 faster, above 1 slower
 
 tools:
   enabled: true                # false = JARVIS only talks

@@ -2,7 +2,7 @@
 
 A modular, local, voice-controlled personal AI assistant for Windows, built step by step.
 
-**Current status: Phase 4 (voice, tools, and memory with reminders).**
+**Current status: Phase 5 (voice, tools, memory and reminders, weather, search, email drafts, music, app finder).**
 
 | Phase | Scope | Status |
 |---|---|---|
@@ -10,7 +10,8 @@ A modular, local, voice-controlled personal AI assistant for Windows, built step
 | 2 | Microphone, Faster-Whisper, Piper TTS, push-to-talk | Built: needs testing on your PC |
 | 3 | Validated tools (open apps and folders, CPU/RAM, date/time, list files) | Built: needs testing on your PC |
 | 4 | SQLite memory: facts, past conversations, reminders | Built: needs testing on your PC |
-| 5 | Web UI, status indicators, system monitor | Planned |
+| 5 | Weather, web search, Gmail drafts, music in VLC, app finder | Built: needs testing on your PC |
+| 6 | Desktop dashboard (PySide6) | Planned |
 
 ## Architecture in one minute
 
@@ -149,6 +150,36 @@ python -m jarvis memory wipe             # delete EVERYTHING (you must type DELE
 
 **Privacy:** everything stays in `data/jarvis.db` on your PC, which is git-ignored. In `config/settings.yaml` under `memory:` set `save_conversations: false` to keep facts and reminders but stop storing conversations, or `enabled: false` to turn memory off entirely. If the database cannot be opened, JARVIS carries on without memory.
 
+## Weather, search, email, music and more apps (Phase 5)
+
+| Say | What happens |
+|---|---|
+| "What's the weather?" | Current conditions in your city plus today's high, low and chance of rain |
+| "What's the weather tomorrow?" / "on Friday?" | Daily summary (up to 7 days ahead) |
+| "What will it be like at 2pm?" / "tomorrow morning?" | Forecast for that hour |
+| "Search Google for the best current action movies" | Opens the results in Chrome |
+| "Search YouTube for lofi beats" / "Search YouTube Music for ..." | Opens those results (you press play) |
+| "Open my email" | Opens Gmail in Chrome |
+| "Write an email to Mum about Sunday lunch" | Opens a Gmail **draft** with the recipient, subject and text filled in. **JARVIS never sends it**: you read it and press send |
+| "Open YouTube Music" / "Open FL Studio" / "Open VLC" | Starts it |
+| "Play the Kendrick Lamar GNX album in VLC" | Finds the closest album folder in your music folder and plays it |
+| "Play some music" | Plays your whole music folder |
+
+**Set these up in `config/profile.yaml`:**
+
+- `location`: your city and its coordinates. It is set to Pretoria. Only these coordinates are sent to the weather service (Open-Meteo, free, no account or key). Weather is the only feature that sends anything over the internet.
+- `music: folder`: **placeholder `G:\Music`; change it to your real music folder.** Albums can sit directly in it or one level down (Artist/Album). Folder names need to be readable ("Daft Punk - Discovery" is better than "DP_disc1"). If two albums match equally, JARVIS names them and asks you to be more specific. Also update `folders: music` if you want "open my music folder".
+- `contacts`: optional names and email addresses for "write an email to Mum". An unknown name still opens a draft with the recipient left blank, and JARVIS tells you so.
+- Searching, drafts and weather open or read web pages only. JARVIS does not read search results or your inbox.
+
+**Adding apps: the app finder**
+
+```powershell
+python -m jarvis add-app "FL Studio"
+```
+
+It looks in the usual install folders and the Windows list of registered apps (it never runs anything and never scans your whole drive), shows the matches, and asks you to pick one, name it, and add other names you might say. It then adds the entry under `apps:` in `config/profile.yaml`, keeps your comments, and saves a backup as `profile.yaml.bak`. Restart JARVIS and say "open FL Studio". Microsoft Store apps often have no normal `.exe`, so for those add the path by hand.
+
 ## Test
 
 ```powershell
@@ -192,3 +223,7 @@ Logs go to the console and to `logs/jarvis.log` (rotating).
 | Replies are slow | If `ollama ps` shows CPU, update the NVIDIA driver and restart Ollama. Avoid models above 3B parameters on 4 GB VRAM. |
 | JARVIS says it didn't select a tool when you ask it to remember | Say it shorter: "remember that my project is due on Monday". |
 | A reminder never spoke | JARVIS must be running at that time. Check `python -m jarvis memory` that it was saved with the right time. |
+| JARVIS can't find FL Studio / VLC | Run `python -m jarvis add-app "FL Studio"`, or put the full `.exe` path under `candidates` in `config/profile.yaml`. |
+| "I can't find your music folder" | Set `music: folder` in `config/profile.yaml` to the real path (single quotes around Windows paths). |
+| Weather says it can't reach the service | Needs internet. Try again; if it persists, check `logs/jarvis.log`. |
+| With 16 tools the model picks the wrong one | Say the command shorter and more directly ("search Google for ...", "play GNX in VLC"). Tell me which phrases fail. |

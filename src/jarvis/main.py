@@ -6,6 +6,7 @@
     python -m jarvis voice-check      test microphone, speakers and speech recognition
     python -m jarvis download-models  fetch the speech models in advance
     python -m jarvis memory           see and delete what JARVIS remembers (see the README)
+    python -m jarvis add-app NAME     find a program on this PC and add it to your profile
 """
 
 from __future__ import annotations
@@ -197,17 +198,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory"],
+        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app"],
         default="serve",
         help="serve: API server | chat: text chat | voice: talk to JARVIS | "
         "voice-check: test microphone, speakers and recognition | "
         "download-models: fetch speech models | "
-        "memory: see and delete what JARVIS remembers (list, search, forget, cancel, wipe-history, wipe)",
+        "memory: see and delete what JARVIS remembers (list, search, forget, cancel, wipe-history, wipe) | "
+        "add-app: find a program and add it to your profile",
     )
     parser.add_argument(
         "memory_args",
         nargs="*",
-        help="for `memory`: list | search WORDS | forget ID | cancel ID | wipe-history | wipe",
+        help="for `memory`: list | search WORDS | forget ID | cancel ID | wipe-history | wipe; "
+        "for `add-app`: the app name",
     )
     parser.add_argument(
         "--enter",
@@ -244,6 +247,10 @@ def main(argv: list[str] | None = None) -> int:
             return _download_models(settings)
         if args.command == "memory":
             return _run_memory(settings, args.memory_args)
+        if args.command == "add-app":
+            from jarvis.appfinder import run_add_app
+
+            return run_add_app(args.memory_args, settings.resolve_profile_path())
         # log_config=None lets uvicorn's logs flow through our logging setup.
         uvicorn.run(
             create_app(settings),
