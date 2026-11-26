@@ -1,7 +1,7 @@
 import pytest
 
 from jarvis.profile import Profile
-from jarvis.tools.media import PlayMediaArgs, make_play_media
+from jarvis.tools.media import PlayMediaArgs, forget_index, make_play_media
 from jarvis.tools.registry import ToolStatus
 
 
@@ -359,3 +359,26 @@ def test_artist_and_album_names_become_recogniser_hints(deep_profile):
     assert names[:2] == ["Lil Wayne", "Drake"] or set(names[:2]) == {"Lil Wayne", "Drake"}
     assert "Tha Carter III" in hint_names(deep_profile)
     assert hint_names(Profile()) == []
+
+
+def test_search_forgives_near_misses_like_a_search_box(tmp_path):
+    root = tmp_path / "Music"
+    for rel in ["The Weeknd/After Hours/01 Heartless.mp3", "The Weeknd/After Hours/02 Blinding Lights.mp3", "Lil Wayne/Tha Carter/01 Love Me.mp3"]:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+    forget_index()
+    profile = Profile.model_validate(
+        {"music": {"folder": str(root), "player": "vlc"}, "apps": {"vlc": {"label": "VLC", "candidates": ["vlc"]}}}
+    )
+    for spoken in ["Heartless by The Weekend", "heartless weeknd", "blinding light the weekend"]:
+        launcher = FakeLauncher()
+        result = play(profile, launcher, spoken)
+        assert result.status is ToolStatus.LAUNCHED, spoken
+    launcher = FakeLauncher()
+    play(profile, launcher, "Heartless by The Weekend")
+    assert launcher.started[0][1].endswith("01 Heartless.mp3")
+    launcher = FakeLauncher()
+    assert play(profile, launcher, "Love Me by Lil Wayne").status is ToolStatus.LAUNCHED
+    assert launcher.started[0][1].endswith("01 Love Me.mp3")
+    assert play(profile, FakeLauncher(), "Thriller Michael Jackson").status is ToolStatus.FAILED

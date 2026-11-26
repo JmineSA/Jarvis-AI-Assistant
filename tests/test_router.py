@@ -137,7 +137,6 @@ def test_a_reminder_without_a_time_goes_to_the_model(route):
 @pytest.mark.parametrize(
     "text",
     [
-        "open the pod bay doors",          # not in the profile
         "tell me a joke",
         "what do you think about open source",
         "who is the president of France",
@@ -202,3 +201,77 @@ def test_media_controls(route, text, action):
 def test_media_words_inside_other_sentences_are_left_alone(route):
     assert route("what is the next prime number") is None
     assert route("tell me to stop procrastinating") is None
+
+
+# ------------------------------------------------------------------ video and drive
+def _drive_router():
+    from jarvis.profile import Profile
+
+    profile = Profile.model_validate({"drives": ["G:\\"], "music": {"folder": "G:\\Music"}})
+    tools = ["play_video", "open_drive_folder", "play_media", "open_app", "open_folder", "media_control"]
+    return CommandRouter(profile, tools)
+
+
+@pytest.mark.parametrize(
+    "text,name,args",
+    [
+        ("open the main folder", "open_drive_folder", {"name": "main"}),
+        ("open the G drive", "open_drive_folder", {"name": "G"}),
+        ("open the movies folder", "open_drive_folder", {"name": "movies"}),
+        ("play the movie Dune", "play_video", {"name": "Dune"}),
+        ("play a movie", "play_video", {"name": ""}),
+        ("watch Dune Part Two", "play_video", {"name": "Dune Part Two"}),
+        ("play the movie Dune in VLC", "play_video", {"name": "Dune"}),
+        ("open the movie folder and play Dune", "play_video", {"name": "Dune", "folder": "movie"}),
+        ("open the series folder and then play Breaking Bad", "play_video", {"name": "Breaking Bad", "folder": "series"}),
+    ],
+)
+def test_drive_and_video_commands(text, name, args):
+    call = _drive_router()(text)
+    assert call is not None and call.name == name and call.arguments == args
+
+
+def test_music_commands_stay_music_with_drives_on():
+    router = _drive_router()
+    assert router("play Love Me by Lil Wayne").name == "play_media"
+    assert router("open my music folder and play Kendrick").name == "play_media"
+    assert router("play music").name == "play_media"
+
+
+def test_unknown_app_names_go_to_the_start_menu_lookup():
+    router = _drive_router()
+    assert router("open Pod Player").arguments == {"name": "Pod Player"}
+    assert router("open the Pod Player app").arguments == {"name": "Pod Player"}
+    assert router("open it") is None
+    assert router("open the file and then print it") is None
+
+
+# ------------------------------------------------------------------ several steps in one sentence
+def _names(call):
+    calls = call if isinstance(call, list) else [call]
+    return [(c.name, c.arguments) for c in calls]
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("in the music folder search Love Me by Lil Wayne and play it in VLC", [("play_media", {"name": "Love Me by Lil Wayne", "source": "local"})]),
+        ("in the main folder search a Drake song", [("play_media", {"name": "Drake", "source": "local"})]),
+        ("search the music folder for Heartless by The Weeknd", [("play_media", {"name": "Heartless by The Weeknd", "source": "local"})]),
+        ("search Love Me and play it", [("play_media", {"name": "Love Me", "source": "local"})]),
+        (
+            "open the main folder and then search the music folder for Heartless and play it in VLC",
+            [("open_drive_folder", {"name": "main"}), ("play_media", {"name": "Heartless", "source": "local"})],
+        ),
+        ("open the main folder, then open the movies folder", [("open_drive_folder", {"name": "main"}), ("open_drive_folder", {"name": "movies"})]),
+        ("open Pod Player and open the main folder", [("open_app", {"name": "Pod Player"}), ("open_drive_folder", {"name": "main"})]),
+    ],
+)
+def test_several_steps_in_one_sentence(text, expected):
+    assert _names(_drive_router()(text)) == expected
+
+
+def test_steps_that_do_not_both_make_sense_go_to_the_model():
+    router = _drive_router()
+    assert router("open the main folder and tell me a joke") is None
+    assert router("how do I make tea and then coffee") is None

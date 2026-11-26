@@ -250,6 +250,32 @@ On start JARVIS says, for example, "Good morning, boss. All systems are running.
 
 **Reminders in the greeting:** after the status line JARVIS reads today's upcoming reminders, earliest first, at most `ui.briefing_max` (default 2), then says how many more are left ("And 3 more later today."). Reminders already late are announced by the reminder scheduler. There is no priority field yet, so "most important" means "soonest".
 
+## Automatic tests (CI)
+
+`.github/workflows/ci.yml` runs the whole test suite on GitHub (Windows and Linux) on every push to `main` and every pull request. Nothing to set up: push the branch and look at the Actions tab. The tests use fakes, so they need no microphone, Ollama or internet.
+
+## Your drive: folders and movies (Phase 6.8)
+
+Add your main drive once in `config/profile.yaml` (no need to list every folder):
+
+```yaml
+drives:
+  - 'G:\'
+```
+
+- "open the main folder" / "open the G drive" opens the drive.
+- "open the movies folder" (or games, study, documentaries...) finds a folder of that name anywhere on the drive (6 levels deep, plural or singular).
+- "play the movie Dune", "watch Dune", or "open the movies folder and play Dune" finds the video file and plays it in VLC. A series name ("play Breaking Bad") plays its whole folder. After you open a folder, "play ..." searches inside it first.
+- If several things match, JARVIS lists up to three and you answer "the second one" or part of the name.
+- Safety: only folders and video files inside the listed drives are touched, nothing is deleted or changed, and a path that tries to escape the drive (`..`) is ignored. Music still goes through the music folder ("play music", "play <song>").
+- The first request reads the drive's folder listing (a few seconds on a big drive, done in the background at start-up) and reuses it for 10 minutes.
+
+## Search like Windows, any app, several steps (Phase 6.9)
+
+- **Forgiving music search:** words that are not in your library are matched to the closest spelling that is, so "Heartless by The Weekend" finds The Weeknd, and "01 Love Me" is found by "Love Me". It searches the whole path (artist / album / song), up to 6 levels deep. If something still fails, run `python -m jarvis music-check "the words you said"` to see what it finds.
+- **Any installed app, no locations needed:** "open Pod Player" looks the name up in your Start menu shortcuts and Microsoft Store apps if it is not in `profile.yaml`. Apps in the profile still come first. If two match equally, JARVIS asks which one. Only programs listed in the Start menu are ever started, and uninstallers are skipped. (This part needs Windows; please test it on your PC.)
+- **Several steps in one sentence:** "open the main folder and then search the music folder for Heartless and play it in VLC", "in the music folder search Love Me by Lil Wayne and play it". The folder names are hints; JARVIS runs the steps in order and stops if one fails. Sentences it cannot split cleanly go to the model as before.
+
 ## Test
 
 ```powershell

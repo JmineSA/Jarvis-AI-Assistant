@@ -84,6 +84,7 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
     """Voice conversation: hold the push-to-talk key, speak, release, hear the answer."""
     from jarvis.orchestrator import State, VoiceAssistant
     from jarvis.tools.media import hint_names
+    from jarvis.tools.drives import hint_names as drive_hint_names
     from jarvis.voice.factory import build_voice_stack
     from jarvis.voice.interfaces import VoiceError
 
@@ -93,7 +94,7 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
         stack = build_voice_stack(
             settings,
             use_enter=use_enter,
-            extra_hints=[*profile.spoken_names(), *hint_names(profile)],
+            extra_hints=[*profile.spoken_names(), *hint_names(profile), *drive_hint_names(profile)],
             correction_terms=profile.spoken_names(),
         )
     except VoiceError as exc:

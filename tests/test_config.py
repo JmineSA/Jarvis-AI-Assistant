@@ -107,9 +107,10 @@ def test_tools_defaults():
     assert Settings().resolve_profile_path().is_absolute()
 
 
-def test_profile_path_env_override():
-    settings = load_settings(env={"JARVIS_PROFILE": "/tmp/other.yaml"})
-    assert str(settings.resolve_profile_path()) == "/tmp/other.yaml"
+def test_profile_path_env_override(tmp_path):
+    target = tmp_path / "other.yaml"  # a real absolute path on any OS (Windows has no /tmp)
+    settings = load_settings(env={"JARVIS_PROFILE": str(target)})
+    assert settings.resolve_profile_path() == target
 
 
 def test_tools_section_in_yaml(tmp_path):
@@ -132,6 +133,7 @@ def test_memory_defaults():
     assert Settings().resolve_database_path().is_absolute()
 
 
-def test_database_path_env_override():
-    settings = load_settings(env={"JARVIS_DB": "/tmp/elsewhere.db"})
-    assert str(settings.resolve_database_path()) == "/tmp/elsewhere.db"
+def test_database_path_env_override(tmp_path):
+    target = tmp_path / "elsewhere.db"
+    settings = load_settings(env={"JARVIS_DB": str(target)})
+    assert settings.resolve_database_path() == target

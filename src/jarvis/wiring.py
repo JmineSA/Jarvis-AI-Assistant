@@ -15,6 +15,7 @@ from jarvis.memory.store import MemoryStore
 from jarvis.profile import Profile, load_profile
 from jarvis.tools.builtin import build_registry
 from jarvis.tools.executor import ToolExecutor
+from jarvis.tools.drives import prewarm as prewarm_drives
 from jarvis.tools.media import prewarm as prewarm_music
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,7 @@ def build_brain(
         logger.warning("always_confirm names tools that do not exist: %s", ", ".join(unknown))
     logger.info("Tools ready: %s", ", ".join(registry.names()))
     prewarm_music(profile)
+    prewarm_drives(profile)
     router = (
         CommandRouter(profile, registry.names(), aliases=settings.voice.stt.name_aliases)
         if settings.brain.fast_commands

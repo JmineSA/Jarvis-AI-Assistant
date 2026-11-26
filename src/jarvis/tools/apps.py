@@ -5,13 +5,15 @@ from __future__ import annotations
 import os
 import shutil
 from collections.abc import Callable
+from pathlib import Path
 from urllib.parse import urlparse
 
 from pydantic import Field
 
 from jarvis.profile import Profile, expand_path
 from jarvis.tools.launcher import Launcher
-from jarvis.tools.registry import ToolArgs, ToolResult
+from jarvis.tools.registry import ToolArgs, ToolResult, ToolStatus
+from jarvis.tools.startmenu import StartApp, StartMenu
 
 
 def find_executable(
@@ -47,11 +49,38 @@ def make_open_app(
     launcher: Launcher,
     which: Callable[[str], str | None] = shutil.which,
     exists: Callable[[str], bool] = os.path.isfile,
+    startmenu: StartMenu | None = None,
 ) -> Callable[[OpenAppArgs], ToolResult]:
+    def from_start_menu(name: str) -> ToolResult:
+        """Not in your profile: look for it among the installed programs."""
+        if startmenu is None:
+            return _unknown(profile, "apps", name, "an app")
+        matches = startmenu.find(name)
+        if not matches:
+            return ToolResult.failed(f"I couldn't find an app called {name} on this computer.")
+        if len(matches) > 1:
+            names = "; ".join(f"{i}. {m.name}" for i, m in enumerate(matches[:3], 1))
+            return ToolResult(
+                ToolStatus.FAILED,
+                f"That matches {len(matches)} apps: {names}. Which one? Say the number or part of the name.",
+                tuple((m.name, {"name": m.name}) for m in matches[:3]),
+            )
+        app: StartApp = matches[0]
+        try:
+            if app.kind == "store":
+                launcher.start(["explorer.exe", f"shell:AppsFolder\\{app.target}"])
+            else:
+                launcher.open_path(Path(app.target))
+        except OSError as exc:
+            return ToolResult.failed(f"I couldn't start {app.name}: {exc.strerror or exc}.")
+        return ToolResult.launched(f"Opening {app.name}.")
+
     def run(args: OpenAppArgs) -> ToolResult:
         key = profile.resolve("apps", args.name)
         if key is None:
-            return _unknown(profile, "apps", args.name, "an app")
+            if args.folder:
+                return _unknown(profile, "apps", args.name, "an app")
+            return from_start_menu(args.name)
         app = profile.apps[key]
         label = profile.label("apps", key)
 

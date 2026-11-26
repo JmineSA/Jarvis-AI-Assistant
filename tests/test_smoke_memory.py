@@ -67,6 +67,7 @@ async def test_remember_remind_recall_forget_and_fire(settings, tmp_path):
 
 
 def test_tests_never_touch_the_real_database():
-    from jarvis.config import PROJECT_ROOT
+    """Your own data/jarvis.db may exist; the tests just must not create or change it."""
+    from conftest import REAL_DB_AT_START, real_db_state  # pytest loads tests/conftest.py under this name
 
-    assert not (PROJECT_ROOT / "data" / "jarvis.db").exists()
+    assert real_db_state() == REAL_DB_AT_START

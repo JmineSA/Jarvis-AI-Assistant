@@ -88,6 +88,8 @@ class Profile(BaseModel):
     owner_name: str | None = None
     location: Location | None = None
     music: MusicEntry = Field(default_factory=MusicEntry)
+    # Drives JARVIS may browse and play videos from, e.g. ['G:\\']. Nothing outside them is touched.
+    drives: list[str] = Field(default_factory=list)
     apps: dict[str, AppEntry] = Field(default_factory=dict)
     folders: dict[str, FolderEntry] = Field(default_factory=dict)
     websites: dict[str, SiteEntry] = Field(default_factory=dict)

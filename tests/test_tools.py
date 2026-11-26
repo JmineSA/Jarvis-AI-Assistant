@@ -299,9 +299,8 @@ def test_registry_contains_expected_tools_and_schemas(profile):
         "play_media", "media_control", "system_status", "current_time",
     ]
     schemas = {s["function"]["name"]: s["function"] for s in registry.schemas()}
-    assert schemas["open_app"]["parameters"]["properties"]["name"]["enum"] == [
-        "vscode", "jupyter", "chrome", "powerbi", "ghost",
-    ]
+    description = schemas["open_app"]["parameters"]["properties"]["name"]["description"]
+    assert "Saved apps:" in description and "enum" not in schemas["open_app"]["parameters"]["properties"]["name"]
     assert schemas["open_app"]["parameters"]["required"] == ["name"]
     assert schemas["current_time"]["parameters"]["properties"] == {}
 
@@ -309,4 +308,4 @@ def test_registry_contains_expected_tools_and_schemas(profile):
 def test_empty_profile_only_offers_system_tools():
     registry = build_registry(Profile(), FakeLauncher())
     # No apps, folders, music or location: only the tools that need nothing from the profile.
-    assert registry.names() == ["web_search", "maps", "compose_email", "play_media", "media_control", "system_status", "current_time"]
+    assert registry.names() == ["open_app", "web_search", "maps", "compose_email", "play_media", "media_control", "system_status", "current_time"]

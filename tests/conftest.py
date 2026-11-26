@@ -1,6 +1,18 @@
 import pytest
 
-from jarvis.config import Settings
+from jarvis.config import PROJECT_ROOT, Settings
+
+
+def real_db_state():
+    """(exists, size, modified time) of the real data/jarvis.db, to prove tests leave it alone."""
+    path = PROJECT_ROOT / "data" / "jarvis.db"
+    if not path.exists():
+        return (False, 0, 0.0)
+    info = path.stat()
+    return (True, info.st_size, info.st_mtime)
+
+
+REAL_DB_AT_START = real_db_state()  # taken when pytest starts, before any test runs
 
 
 @pytest.fixture

@@ -35,7 +35,7 @@ async def test_tools_are_offered_to_the_model(fake_client_cls):
     client = fake_client_cls(["Hello."])
     await make_brain(client).respond("hi")
     names = [t["function"]["name"] for t in client.tools_offered]
-    assert names == ["web_search", "maps", "compose_email", "play_media", "media_control", "system_status", "current_time"]
+    assert names == ["open_app", "web_search", "maps", "compose_email", "play_media", "media_control", "system_status", "current_time"]
 
 
 async def test_plain_conversation_needs_no_tool(fake_client_cls):
@@ -273,3 +273,22 @@ def test_pick_choice_rules():
     assert pick_choice("alpha", opts) == 0
     assert pick_choice("song", opts) is None  # matches both
     assert pick_choice("something else entirely", opts) is None
+
+
+async def test_several_routed_steps_run_in_order_and_stop_after_a_failure(fake_client_cls):
+    ran = []
+
+    def make(name, ok):
+        def run(args):
+            ran.append(name)
+            return ToolResult.launched(f"{name} done.") if ok else ToolResult.failed(f"{name} failed.")
+
+        return Tool(name, name, {"type": "object", "properties": {}}, _PickArgs, run)
+
+    registry = ToolRegistry()
+    for name, ok in [("a", True), ("b", False), ("c", True)]:
+        registry.register(make(name, ok))
+    router = RecordingRouter([ToolCall("a", {}), ToolCall("b", {}), ToolCall("c", {})])
+    brain = Brain(fake_client_cls(["x"]), "system", executor=ToolExecutor(registry), router=router)
+    assert await brain.respond("do a then b then c") == "a done. b failed."
+    assert ran == ["a", "b"]

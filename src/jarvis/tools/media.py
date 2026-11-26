@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
 import math
 import os
@@ -209,6 +210,41 @@ def _score(wanted: list[str], entry: Entry) -> int:
     return sum(1 for word in wanted if word in entry.tokens)
 
 
+_vocab_cache: dict[int, tuple[list[Entry], frozenset[str]]] = {}
+
+
+def _vocabulary(entries: list[Entry]) -> frozenset[str]:
+    cached = _vocab_cache.get(id(entries))
+    if cached is not None and cached[0] is entries:
+        return cached[1]
+    vocab = frozenset().union(*(e.tokens for e in entries)) if entries else frozenset()
+    _vocab_cache.clear()
+    _vocab_cache[id(entries)] = (entries, vocab)
+    return vocab
+
+
+def _alternatives(wanted: list[str], entries: list[Entry]) -> list[frozenset[str]]:
+    """Per spoken word, the words in your library it could mean (like a search box that forgives typos).
+
+    A word that exists in your library as spoken stays as it is; one that does not ("weekend" for
+    The Weeknd) is matched to the closest spelled words that do.
+    """
+    vocab = _vocabulary(entries)
+    alts: list[frozenset[str]] = []
+    for word in wanted:
+        if word in vocab or len(word) < 4:
+            alts.append(frozenset({word}))
+            continue
+        close = difflib.get_close_matches(word, vocab, n=3, cutoff=0.75)
+        prefixed = [v for v in vocab if len(word) >= 4 and v.startswith(word)][:3]
+        alts.append(frozenset({word, *close, *prefixed}))
+    return alts
+
+
+def _score_alts(alts: list[frozenset[str]], entry: Entry) -> int:
+    return sum(1 for options in alts if options & entry.tokens)
+
+
 def _title(root: Path, path: Path) -> str:
     return " - ".join(path.relative_to(root).with_suffix("").parts) if path.is_file() else path.name
 
@@ -278,7 +314,9 @@ def make_play_media(
         else:
             not_found = ToolResult.failed(f"I couldn't find anything matching {query} in your music folder.")
             entries = get_index(root)
-            scored = [(score, e) for e in entries if (score := _score(wanted, e))]
+            alts = _alternatives(wanted, entries)
+            known = set().union(*alts)
+            scored = [(score, e) for e in entries if (score := _score_alts(alts, e))]
             if not scored:
                 return not_found, "not_found"
             need = 1 if len(wanted) == 1 else math.ceil(len(wanted) * 0.75)
@@ -295,8 +333,8 @@ def make_play_media(
                 pool = parents[:1]
             if len(pool) > 1:
                 # Several songs share the words: the one with the fewest extra words is the closest title.
-                tidy = sorted(pool, key=lambda e: (len(e.tokens - set(wanted)), str(e.path)))
-                if len(tidy[0].tokens - set(wanted)) < len(tidy[1].tokens - set(wanted)):
+                tidy = sorted(pool, key=lambda e: (len(e.tokens - known), str(e.path)))
+                if len(tidy[0].tokens - known) < len(tidy[1].tokens - known):
                     pool = tidy[:1]
             if len(pool) > 1:
                 shown = pool[:3]

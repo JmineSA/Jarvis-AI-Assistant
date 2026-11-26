@@ -29,6 +29,7 @@ from jarvis.orchestrator import LLM_DOWN_SPEECH, State, VoiceAssistant
 from jarvis.profile import Profile
 from jarvis.reminders import ReminderScheduler
 from jarvis.tools.media import hint_names
+from jarvis.tools.drives import hint_names as drive_hint_names
 from jarvis.tools.registry import ToolResult
 from jarvis.tools.weather import current_chip, fetch_forecast
 from jarvis.voice.interfaces import Trigger, VoiceError
@@ -443,7 +444,7 @@ class Engine(QObject):
     def _run_voice(self) -> None:
         """Runs on its own thread: the push-to-talk loop."""
         try:
-            hints = [*self.profile.spoken_names(), *hint_names(self.profile)]
+            hints = [*self.profile.spoken_names(), *hint_names(self.profile), *drive_hint_names(self.profile)]
             if self._voice_builder is not None:
                 stack = self._voice_builder(self.settings, hints)
             else:

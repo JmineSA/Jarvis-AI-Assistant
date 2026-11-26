@@ -21,6 +21,7 @@ from jarvis.ai.ollama_client import ChatResult, OllamaResponseError, ToolCall
 from jarvis.ai.prompts import SYSTEM_PROMPT
 from jarvis.memory.store import MemoryStore
 from jarvis.tools.executor import Confirm, ToolExecutor
+from jarvis.tools.registry import ToolStatus
 
 logger = logging.getLogger(__name__)
 
@@ -182,14 +183,20 @@ class Brain:
                     self._remember_turn(user_message, outcome.message, text)
                     return outcome.message
                 # Not an answer to the question: treat it as a fresh request.
-            call = self._router(text) if (self._router and self._executor) else None
-            if call is not None and self._executor is not None:
-                logger.info("Fast path: %s %s", call.name, call.arguments)
+            planned = self._router(text) if (self._router and self._executor) else None
+            if planned is not None and self._executor is not None:
+                steps = planned if isinstance(planned, list) else [planned]
                 self.last_route = "fast"
-                outcome = await self._executor.run(call.name, call.arguments, confirm)
-                if outcome.choices:
-                    self._pending = (call.name, outcome.choices)
-                reply = outcome.message
+                messages_out: list[str] = []
+                for step in steps:
+                    logger.info("Fast path: %s %s", step.name, step.arguments)
+                    outcome = await self._executor.run(step.name, step.arguments, confirm)
+                    messages_out.append(outcome.message)
+                    if outcome.choices:
+                        self._pending = (step.name, outcome.choices)
+                    if outcome.status is not ToolStatus.LAUNCHED and outcome.status is not ToolStatus.DONE:
+                        break  # do not carry on with the next step after one that did not work
+                reply = " ".join(messages_out)
                 self._remember_turn(user_message, reply, text)
                 return reply
 

@@ -43,6 +43,33 @@ _PLAY = re.compile(
     r"^(?:(?:open|launch|start)\s+(?P<opened>.+?)\s+(?:and|then)\s+)?(?:play|put on|listen to)\s+(?P<rest>.+)$",
     re.IGNORECASE,
 )
+_VIDEO = re.compile(
+    r"^(?:(?:open|go to)\s+(?:the\s+|my\s+)?(?P<folder>.+?)\s+(?:folder\s+)?(?:and\s+then|and|then)\s+)?"
+    r"(?:play|watch|put on)\s+(?:the\s+|a\s+|some\s+)?(?:(?P<kind>movie|film|series|show|episode|video|documentary)\s*)?(?P<name>.*?)"
+    r"(?:\s+(?:in|on|with|using)\s+(?:vlc|(?:the\s+)?media player))?$",
+    re.IGNORECASE,
+)
+_STEP_BREAK = re.compile(r"\s*,?\s+(?:and\s+then|and\s+after\s+that|after\s+that|then|and)\s+|\s*,\s+", re.IGNORECASE)
+_TAIL_VLC = r"(?:\s+(?:in|on|with|using)\s+(?:vlc|(?:the\s+)?media player))?"
+_PLAY_IT = r"(?:\s+(?:and\s+)?(?:then\s+)?play(?:\s+it)?)?"
+_SCOPED_MUSIC = (
+    re.compile(
+        r"^(?:in|inside|from)\s+(?:the\s+|my\s+)?(?:main|music|my music)(?:\s+folder)?\s*,?\s*"
+        r"(?:(?:search|find|look)(?:\s+for)?|play)?\s*(?P<q>.+?)" + _PLAY_IT + _TAIL_VLC + "$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:search|find|look\s+for)\s+(?:the\s+|my\s+)?(?:music|main)\s+folder\s+for\s+(?P<q>.+?)" + _PLAY_IT + _TAIL_VLC + "$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:search|find)\s+(?:for\s+)?(?P<q>.+?)\s+(?:and\s+)?(?:then\s+)?play\s+it" + _TAIL_VLC + "$",
+        re.IGNORECASE,
+    ),
+)
+_DRIVE_FOLDER = re.compile(
+    r"^(?:(?:the|my)\s+)?(?P<name>.+?)\s+(?:folder|drive|directory)$|^(?:the\s+)?(?P<root>main|root)$", re.IGNORECASE
+)
 _BARE_MUSIC = {
     "music", "some music", "my music", "songs", "some songs", "my songs", "something", "anything",
     "my library", "my music library", "random music", "some random music", "a song", "some tunes", "tunes",
@@ -158,18 +185,96 @@ class CommandRouter:
         self._clock = clock
         self._aliases = list(aliases)
 
-    def __call__(self, text: str) -> ToolCall | None:
+    def __call__(self, text: str) -> ToolCall | list[ToolCall] | None:
+        """One call, or a short list of calls for "do this, then that"; None leaves it to the model."""
         command = clean(text, self._aliases)
         if not command or len(command) > 200:
             return None
+        return self._plan(command, depth=0)
+
+    def _plan(self, command: str, depth: int) -> ToolCall | list[ToolCall] | None:
+        call = self._single(command)
+        if call is not None or depth >= 2:
+            return call
+        for match in _STEP_BREAK.finditer(command):
+            left, right = command[: match.start()].strip(), command[match.end():].strip()
+            first = self._single(left)
+            if first is None or not right:
+                continue
+            rest = self._plan(right, depth + 1)
+            if rest is not None:
+                return [first, *(rest if isinstance(rest, list) else [rest])]
+        return None
+
+    def _single(self, command: str) -> ToolCall | None:
         for handler in (
-            self._media, self._play, self._open, self._weather, self._maps, self._time, self._status,
+            self._media, self._scoped_music, self._video, self._play, self._open, self._weather, self._maps, self._time, self._status,
             self._search, self._remember, self._remind, self._list_reminders,
         ):
             call = handler(command)
             if call is not None and call.name in self._tools:
                 return call
         return None
+
+    # ------------------------------------------------------------------ video and drive
+
+    def _scoped_music(self, command: str) -> ToolCall | None:
+        """"In the music folder search Love Me by Lil Wayne and play it": the folder is only a hint."""
+        if "play_media" not in self._tools:
+            return None
+        for pattern in _SCOPED_MUSIC:
+            match = pattern.match(command)
+            if match:
+                query = re.sub(r"^(?:a|an|the|some|any)\s+", "", match.group("q").strip(), flags=re.IGNORECASE)
+                query = re.sub(r"\s+(?:songs?|tracks?|music)$", "", query, flags=re.IGNORECASE).strip()
+                if not query or re.match(r"^(?:open|launch|go|start)\b", query, re.IGNORECASE):
+                    return None
+                if re.search(r"\b(?:movie|film|series|video|google|youtube)\b", query, re.IGNORECASE):
+                    return None
+                return ToolCall("play_media", {"name": query, "source": "local"})
+        return None
+
+    def _video(self, command: str) -> ToolCall | None:
+        match = _VIDEO.match(command)
+        if not match or "play_video" not in self._tools:
+            return None
+        folder = (match.group("folder") or "").strip()
+        kind = match.group("kind")
+        name = match.group("name").strip()
+        verb = command.split()[0].lower()
+        if folder:
+            if re.search(r"music|youtube|song|album", folder, re.IGNORECASE):
+                return None  # "open my music folder and play ..." stays music
+        elif not kind and verb != "watch":
+            return None  # a bare "play X" is music
+        if name.lower() in {"it", "that", "this", "something", "anything", "one"}:
+            name = ""
+        arguments = {"name": name}
+        if folder:
+            arguments["folder"] = folder
+        return ToolCall("play_video", arguments)
+
+    def _installed_app(self, name: str) -> ToolCall | None:
+        """"open Pod Player": not in the profile, so let open_app look in the Start menu."""
+        if "open_app" not in self._tools:
+            return None
+        words = name.split()
+        if not 1 <= len(words) <= 4 or re.match(r"^(?:it|that|this|them|something|anything|up|my\s+(?:stuff|things))\b", name, re.IGNORECASE):
+            return None
+        if re.search(r"\b(?:and|then|to|for|in|on|with)\b", name, re.IGNORECASE):
+            return None  # a longer request: leave it to the model
+        return ToolCall("open_app", {"name": _NAME_TRAIL.sub("", _NAME_LEAD.sub("", name.strip()))})
+
+    def _drive_folder(self, name: str) -> ToolCall | None:
+        if "open_drive_folder" not in self._tools:
+            return None
+        if re.search(r"\b(?:and|then)\b|,", name, re.IGNORECASE):
+            return None  # two requests in one: split into steps instead
+        match = _DRIVE_FOLDER.match(name.strip())
+        if not match:
+            return None
+        spoken = match.group("name") or match.group("root")
+        return ToolCall("open_drive_folder", {"name": spoken.strip()})
 
     # ------------------------------------------------------------------ music
 
@@ -230,7 +335,7 @@ class CommandRouter:
             return None
         found = self._kind_of(name)
         if found is None:
-            return None
+            return self._drive_folder(name) or self._installed_app(name)
         kind, key = found
         tool = {"apps": "open_app", "folders": "open_folder", "websites": "open_website"}[kind]
         return ToolCall(tool, {"name": key})

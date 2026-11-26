@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -15,6 +16,13 @@ from jarvis.tools.apps import (
     make_open_app,
     make_open_folder,
     make_open_website,
+)
+from jarvis.tools.drives import (
+    OpenDriveFolderArgs,
+    PlayVideoArgs,
+    State,
+    make_open_drive_folder,
+    make_play_video,
 )
 from jarvis.tools.files import ListFilesArgs, make_list_files
 from jarvis.tools.launcher import Launcher, SystemLauncher
@@ -36,6 +44,7 @@ from jarvis.tools.memory_tools import (
     make_set_reminder,
 )
 from jarvis.tools.registry import Tool, ToolRegistry
+from jarvis.tools.startmenu import StartMenu
 from jarvis.tools.system import NoArgs, make_current_time, make_system_status
 from jarvis.tools.weather import WeatherArgs, make_weather
 from jarvis.tools.web import (
@@ -155,29 +164,43 @@ def build_registry(
     store: MemoryStore | None = None,
     session_id: str | None = None,
     media_keys: KeySender | None = None,
+    startmenu: StartMenu | None = None,
 ) -> ToolRegistry:
     launcher = launcher or SystemLauncher()
     registry = ToolRegistry()
 
-    if profile.apps:
-        folder_prop = (
-            {"folder": _name_property(profile, "folders", "Optional project folder to open it in")}
-            if profile.folders
-            else {}
-        )
-        registry.register(
-            Tool(
-                name="open_app",
-                description="Open an application on the computer, optionally inside a project folder.",
-                parameters={
-                    "type": "object",
-                    "properties": {"name": _name_property(profile, "apps", "The application"), **folder_prop},
-                    "required": ["name"],
+    folder_prop = (
+        {"folder": _name_property(profile, "folders", "Optional project folder to open it in")}
+        if profile.folders
+        else {}
+    )
+    known = ", ".join(profile.labels("apps"))
+    menu = startmenu or StartMenu()
+    if startmenu is None and os.name == "nt":
+        menu.prewarm()  # read the installed-programs list in the background
+    registry.register(
+        Tool(
+            name="open_app",
+            description=(
+                "Open an application on the computer by its name, optionally inside a project folder. "
+                "Any installed program can be opened, not only the saved ones."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The application's name as the user said it"
+                        + (f". Saved apps: {known}." if known else "."),
+                    },
+                    **folder_prop,
                 },
-                args_model=OpenAppArgs,
-                run=make_open_app(profile, launcher),
-            )
+                "required": ["name"],
+            },
+            args_model=OpenAppArgs,
+            run=make_open_app(profile, launcher, startmenu=menu),
         )
+    )
 
     if profile.folders:
         registry.register(
@@ -308,6 +331,39 @@ def build_registry(
             run=make_play_media(profile, launcher),
         )
     )
+    if profile.drives:
+        where = State()  # the folder you last opened, shared by both tools
+        registry.register(
+            Tool(
+                name="open_drive_folder",
+                description=(
+                    "Open the main drive, or any folder on it by name (movies, games, documentaries...), "
+                    "in File Explorer. Use for folders that are not in the saved folder list."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"name": _text_property("Folder name, or 'main' for the whole drive")},
+                    "required": ["name"],
+                },
+                args_model=OpenDriveFolderArgs,
+                run=make_open_drive_folder(profile, launcher, where),
+            )
+        )
+        registry.register(
+            Tool(
+                name="play_video",
+                description="Find a movie, series or video on the user's drive and play it in VLC.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "name": _text_property("The movie, series or video title. Empty plays the folder last opened."),
+                        "folder": _text_property("Optional: only look inside the folder with this name, e.g. movies"),
+                    },
+                },
+                args_model=PlayVideoArgs,
+                run=make_play_video(profile, launcher, where),
+            )
+        )
     registry.register(
         Tool(
             name="media_control",
