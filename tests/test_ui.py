@@ -134,7 +134,7 @@ def test_text_turn_shows_both_sides_and_stores_them(qapp, engine):
     engine.start()
     engine.submit_text("hello")
     assert wait_until(qapp, lambda: ("assistant", "Good evening.") in seen)
-    assert seen[0][0] == "assistant" and "how can I help?" in seen[0][1]  # the greeting comes first
+    assert seen[0][0] == "assistant" and "How can I help you" in seen[0][1]  # the greeting comes first
     assert ("user", "hello") in seen
     assert engine.store.counts().messages == 2
 
@@ -324,9 +324,10 @@ def test_model_info_reaches_the_language_model_card(window):
 
 
 def test_greeting_uses_the_saved_name(engine):
-    assert engine.greeting_text() == "Hi boss, how can I help?"
+    morning = datetime(2026, 11, 26, 10, 0)
+    assert engine.greeting_text(now=morning) == "Good morning, boss. How can I help you this morning?"
     engine.settings.ui.greeting_name = "Jimmy"
-    assert engine.greeting_text() == "Hi Jimmy, how can I help?"
+    assert engine.greeting_text(True, morning).startswith("Good morning, Jimmy. All systems are running.")
 
 
 def test_greeting_can_be_turned_off(qapp, settings, fake_client_cls):
@@ -469,3 +470,15 @@ def test_the_diagnostics_report_hides_the_address_and_lists_devices(settings, tm
     text = build_diagnostics(settings, None, log_lines=3)
     assert "JARVIS diagnostics" in text and "Microphones:" in text and "Last 3 log lines" in text
     assert "Nellmapius" not in text and "Home address:" in text
+
+
+def test_greeting_includes_todays_reminders_before_the_question(engine):
+    from jarvis.memory.store import MemoryStore  # noqa: F401
+
+    now = datetime(2026, 11, 26, 9, 0)
+    engine.store.add_reminder("the team meeting", datetime(2026, 11, 26, 10, 0).timestamp())
+    text = engine.greeting_text(True, now)
+    assert text == (
+        "Good morning, boss. All systems are running. You have the team meeting at 10 AM. "
+        "How can I help you this morning?"
+    )

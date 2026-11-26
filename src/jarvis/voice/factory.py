@@ -23,7 +23,10 @@ class VoiceStack:
 
 
 def build_voice_stack(
-    settings: Settings, use_enter: bool = False, extra_hints: list[str] | None = None
+    settings: Settings,
+    use_enter: bool = False,
+    extra_hints: list[str] | None = None,
+    correction_terms: list[str] | None = None,
 ) -> VoiceStack:
     """Create all voice parts. Downloads the Piper voice first if it is missing.
 
@@ -44,6 +47,9 @@ def build_voice_stack(
             download_root=whisper_dir(models_dir),
             hint_words=hints,
             name_aliases=voice.stt.name_aliases,
+            beam_size=voice.stt.beam_size,
+            auto_gain=voice.stt.auto_gain,
+            correction_terms=[*voice.stt.hint_words, *(correction_terms or [])] if voice.stt.correct_words else [],
         ),
         synthesizer=PiperSynthesizer(voice_path, voice.tts.length_scale),
         player=SoundDevicePlayer(voice.output_device),

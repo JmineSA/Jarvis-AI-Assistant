@@ -175,3 +175,30 @@ def build_diagnostics(settings: Settings, engine: object | None = None, log_line
     log = settings.resolve_log_dir() / "jarvis.log"
     out += ["", f"Last {log_lines} log lines ({log}):", *_tail(log, log_lines)]
     return "\n".join(out)
+
+
+DEMO_VOICES = ["en_GB-alan-medium", "en_GB-northern_english_male-medium", "en_US-ryan-high", "en_US-lessac-high"]
+DEMO_SENTENCE = "Good morning, boss. All systems are running, and your first meeting is at nine."
+
+
+def run_voice_demo(settings, voices: list[str] | None = None, say=print) -> int:
+    """Speak one sentence in several Piper voices so you can pick one. Missing voices are downloaded."""
+    from jarvis.voice.models import ensure_piper_voice
+    from jarvis.voice.output import SoundDevicePlayer
+    from jarvis.voice.tts import PiperSynthesizer
+
+    models_dir = settings.resolve_models_dir()
+    player = SoundDevicePlayer(settings.voice.output_device)
+    chosen = voices or DEMO_VOICES
+    say("Voice demo. Each voice says the same sentence. Note the number you like best.")
+    for number, name in enumerate(chosen, 1):
+        say(f"\n{number}. {name}")
+        try:
+            path = ensure_piper_voice(models_dir, name)
+            synth = PiperSynthesizer(path, settings.voice.tts.length_scale)
+            for clip in synth.synthesize(DEMO_SENTENCE):
+                player.play(clip, lambda: False)
+        except Exception as exc:
+            say(f"   skipped ({exc})")
+    say("\nTo use one, set voice.tts.voice in config/settings.yaml to its name.")
+    return 0

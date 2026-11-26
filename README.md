@@ -236,6 +236,20 @@ If you unzip over an existing project, **merge** `config/profile.yaml` instead o
 - **One-click start:** double-click `start-jarvis.bat` (no console window). Right-click it, *Send to > Desktop (create shortcut)* to get a desktop icon, or pin it to the taskbar. If something goes wrong, use `start-jarvis-console.bat`, which keeps the window open so you can read the error.
 - **Answering "which one?":** when a song name matches several things, JARVIS lists up to three, numbered. Reply with "the second one", "2", or part of the name. Saying "cancel" or anything unrelated drops the question.
 
+## Voice quality (Phase 6.4)
+
+- **Calm speech works:** quiet recordings are raised automatically before recognition (`voice.stt.auto_gain`), and the "no sound heard" threshold is lower (`silence_peak: 0.004`). Still set the Focusrite gain so your normal voice lights the green ring.
+- **Mishearings:** near-misses of your app, folder and contact names are fixed ("power by" -> Power BI, "data bricks" -> Databricks), switch `voice.stt.correct_words`. The model is also told that your words come from speech and may be slightly off, so it acts on the likely meaning.
+- **Accuracy vs speed:** `voice.stt.beam_size` is 3 (about half a second slower than 1). Set 1 for fastest, 5 for most careful.
+- **Pick a voice:** `python -m jarvis voice-demo` speaks one sentence in several Piper voices (each missing one is a 60-115 MB download, skipped if it fails). Add voice names after the command to try others. Then set `voice.tts.voice` in `config/settings.yaml`. Speaking a touch slower (`length_scale: 1.08`) can also sound less robotic.
+- **Models on another drive:** Whisper and Piper already live in `data/models` inside the project. For Ollama, set the user environment variable `OLLAMA_MODELS` (for example `G:\ollama-models`) and restart Ollama.
+
+## Time-aware greeting (Phase 6.5)
+
+On start JARVIS says, for example, "Good morning, boss. All systems are running. How can I help you this morning?" (morning 05-12, afternoon 12-17, evening 17-22, late night after that). "All systems are running" is only said after a quick check that the language model answers; if it doesn't, JARVIS says so instead. Change the name in Settings.
+
+**Reminders in the greeting:** after the status line JARVIS reads today's upcoming reminders, earliest first, at most `ui.briefing_max` (default 2), then says how many more are left ("And 3 more later today."). Reminders already late are announced by the reminder scheduler. There is no priority field yet, so "most important" means "soonest".
+
 ## Test
 
 ```powershell

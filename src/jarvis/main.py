@@ -90,7 +90,12 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
     profile = load_user_profile(settings)
     try:
         # Teach the recogniser the names of your own apps, folders and websites.
-        stack = build_voice_stack(settings, use_enter=use_enter, extra_hints=[*profile.spoken_names(), *hint_names(profile)])
+        stack = build_voice_stack(
+            settings,
+            use_enter=use_enter,
+            extra_hints=[*profile.spoken_names(), *hint_names(profile)],
+            correction_terms=profile.spoken_names(),
+        )
     except VoiceError as exc:
         print(f"Voice setup failed: {exc}", file=sys.stderr)
         return 1
@@ -200,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app", "app", "music-check", "speed-check"],
+        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app", "app", "music-check", "speed-check", "voice-demo"],
         default="serve",
         help="serve: API server | chat: text chat | voice: talk to JARVIS | "
         "voice-check: test microphone, speakers and recognition | "
@@ -209,7 +214,8 @@ def main(argv: list[str] | None = None) -> int:
         "add-app: find a program and add it to your profile | "
         "app: open the desktop dashboard | "
         "music-check: see what JARVIS finds in your music folder (add words to test a song) | "
-        "speed-check: time the model and show whether it runs on the GPU",
+        "speed-check: time the model and show whether it runs on the GPU | "
+        "voice-demo: hear the same sentence in several voices (add voice names to try others)",
     )
     parser.add_argument(
         "memory_args",
@@ -272,6 +278,10 @@ def main(argv: list[str] | None = None) -> int:
             from jarvis.diagnostics import run_speed_check
 
             return run_speed_check(settings)
+        if args.command == "voice-demo":
+            from jarvis.diagnostics import run_voice_demo
+
+            return run_voice_demo(settings, args.memory_args or None)
         if args.command == "add-app":
             from jarvis.appfinder import run_add_app
 

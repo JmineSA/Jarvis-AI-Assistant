@@ -33,6 +33,22 @@ def rms_level(samples: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
 
 
+def level_speech(
+    samples: np.ndarray, target_peak: float = 0.7, max_gain: float = 25.0, floor: float = 0.003
+) -> np.ndarray:
+    """Raise a quiet recording so a calm voice is as clear to Whisper as a loud one.
+
+    Recordings with almost no sound (below `floor`) are returned unchanged, so background
+    hiss is not boosted into words. Loud recordings are never made louder.
+    """
+    samples = np.asarray(samples, dtype=np.float32)
+    peak = peak_level(samples)
+    if peak < floor or peak >= target_peak:
+        return samples
+    gain = min(target_peak / peak, max_gain)
+    return np.clip(samples * gain, -1.0, 1.0).astype(np.float32)
+
+
 _EMOJI = re.compile("[\U0001F300-\U0001FAFF☀-➿️]")
 _LINK = re.compile(r"\[([^\]]+)\]\((?:https?://)?[^)]*\)")
 _URL = re.compile(r"https?://\S+")

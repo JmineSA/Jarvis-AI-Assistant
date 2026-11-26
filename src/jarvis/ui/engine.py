@@ -14,12 +14,15 @@ import itertools
 import logging
 import threading
 import time
+from datetime import datetime
 from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
 from jarvis.ai.ollama_client import OllamaClient, OllamaError
+from jarvis.briefing import reminder_briefing
+from jarvis.greeting import make_greeting
 from jarvis.config import Settings
 from jarvis.memory.store import MemoryStore
 from jarvis.orchestrator import LLM_DOWN_SPEECH, State, VoiceAssistant
@@ -189,9 +192,27 @@ class Engine(QObject):
     def voice_active(self) -> bool:
         return self._assistant is not None
 
-    def greeting_text(self) -> str:
-        name = self.settings.ui.greeting_name.strip() or "boss"
-        return f"Hi {name}, how can I help?"
+    def greeting_text(self, model_ready: bool | None = None, now: datetime | None = None) -> str:
+        moment = now or datetime.now()
+        text = make_greeting(self.settings.ui.greeting_name, moment, model_ready)
+        if self.store is not None:
+            try:
+                extra = reminder_briefing(self.store.pending_reminders(), moment, self.settings.ui.briefing_max)
+            except Exception:
+                logger.exception("Could not read reminders for the greeting")
+                extra = ""
+            # Put the reminders before the closing question so the question stays last.
+            if extra:
+                text = text.rsplit(" How can I help", 1)[0] + " " + extra + " How can I help" + text.rsplit(" How can I help", 1)[1]
+        return text
+
+    def _check_model_ready(self) -> bool | None:
+        """Ask Ollama once, from a non-UI thread, so the spoken hello only claims what is true."""
+        try:
+            status = asyncio.run_coroutine_threadsafe(self.client.health(), self._loop).result(timeout=4)
+            return bool(status.reachable and status.model_available)
+        except Exception:
+            return None
 
     def start(self) -> None:
         if self._started:
@@ -428,7 +449,9 @@ class Engine(QObject):
             else:
                 from jarvis.voice.factory import build_voice_stack
 
-                stack = build_voice_stack(self.settings, extra_hints=hints)
+                stack = build_voice_stack(
+                    self.settings, extra_hints=hints, correction_terms=self.profile.spoken_names()
+                )
         except VoiceError as exc:
             logger.error("Voice setup failed: %s", exc)
             self.voiceChanged.emit(False, str(exc))
@@ -469,7 +492,7 @@ class Engine(QObject):
         self._assistant = assistant
         if self.settings.ui.greet_on_start and not self._greeted:
             self._greeted = True
-            assistant.say(self.greeting_text())  # spoken once the speech models have loaded
+            assistant.say(self.greeting_text(self._check_model_ready()))  # spoken once the speech models have loaded
         try:
             assistant.run()
         except VoiceError as exc:

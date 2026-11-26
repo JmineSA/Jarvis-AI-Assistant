@@ -15,23 +15,26 @@ brain:
 
 voice:
   push_to_talk_key: right_ctrl # hold to talk. Examples: f8, scroll_lock, ctrl+alt+j
-  input_device: 1  # microphone: your Focusrite input. Find numbers with `voice-check`
-  output_device: null  # speakers: index or part of their name
+  input_device: 2              # microphone: your Focusrite input. Find numbers with `voice-check`
+  output_device: null          # speakers: index or part of their name
   min_speech_seconds: 0.3      # shorter recordings are ignored as accidental taps
   max_record_seconds: 30
-  silence_peak: 0.01           # quieter than this = "no sound heard"
+  silence_peak: 0.004          # quieter than this = "no sound heard" (low, so calm speech counts)
   models_dir: data/models
   stt:
     model: small.en            # faster but less accurate: base.en
     language: en
     compute_type: int8
     cpu_threads: 4
+    beam_size: 3               # 1 = fastest; 3 = a little more accurate (+0.5 s); 5 = more careful still
+    auto_gain: true            # raises quiet recordings, so you can talk calmly
+    correct_words: true        # fixes near-misses of your app/folder names
     hint_words: [JARVIS, Power BI, VS Code, Jupyter, Databricks, Chrome, Ollama]
     # Mishearings of "JARVIS" at the start of a sentence that are corrected automatically
     name_aliases: [Travis, Jervis, Jarvas, Javis, Jarvus, Jarvice, Gervais]
   tts:
     voice: en_GB-alan-medium   # Piper voice name
-    length_scale: 0.8         # speaking speed: below 1 faster, above 1 slower
+    length_scale: null         # speaking speed: below 1 faster, above 1 slower
 
 tools:
   enabled: true                # false = JARVIS only talks
@@ -57,5 +60,6 @@ logging:
   backup_count: 3
 
 ui:
-  greeting_name: 'Jimmy'  # what the dashboard calls you (also editable in Settings)
+  greeting_name: boss         # what the dashboard calls you (also editable in Settings)
   greet_on_start: true         # say hello when the dashboard opens
+  briefing_max: 2              # reminders read out at start; the rest are counted (0 = none)

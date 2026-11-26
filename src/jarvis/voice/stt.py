@@ -10,6 +10,8 @@ from typing import Any
 
 import numpy as np
 
+from jarvis.voice.audio_utils import level_speech
+from jarvis.voice.correct import VocabularyCorrector
 from jarvis.voice.interfaces import VoiceError
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,13 @@ class FasterWhisperTranscriber:
         hint_words: list[str] | None = None,
         name_aliases: list[str] | None = None,
         model_factory: Callable[[], Any] | None = None,
+        beam_size: int = 1,
+        auto_gain: bool = True,
+        correction_terms: list[str] | None = None,
     ) -> None:
+        self._beam_size = beam_size
+        self._auto_gain = auto_gain
+        self._corrector = VocabularyCorrector(correction_terms or [])
         self._name_aliases = name_aliases or []
         self._model_name = model
         self._language = language
@@ -90,10 +98,12 @@ class FasterWhisperTranscriber:
 
     def transcribe(self, audio: np.ndarray) -> str:
         model = self._load()
+        if self._auto_gain:
+            audio = level_speech(audio)
         segments, _info = model.transcribe(
             audio.astype(np.float32, copy=False),
             language=self._language,
-            beam_size=1,                      # greedy decoding: fastest on a CPU
+            beam_size=self._beam_size,        # 1 = fastest; 3-5 = a little more accurate, a little slower
             vad_filter=True,                  # drop silence so Whisper does not invent words
             condition_on_previous_text=False,
             initial_prompt=self._prompt,
@@ -101,4 +111,5 @@ class FasterWhisperTranscriber:
         text = " ".join(segment.text.strip() for segment in segments).strip()
         if is_prompt_echo(text, self._prompt):
             return ""
-        return fix_assistant_name(text, self._name_aliases)
+        text = fix_assistant_name(text, self._name_aliases)
+        return self._corrector.correct(text)

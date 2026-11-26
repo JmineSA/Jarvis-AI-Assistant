@@ -76,6 +76,9 @@ class SttSettings(BaseModel):
     language: str | None = "en"
     compute_type: str = "int8"
     cpu_threads: int = Field(4, ge=0)  # 0 = let the library decide
+    beam_size: int = Field(1, ge=1, le=8)  # 1 = fastest; 3 is a little more accurate and ~0.5 s slower
+    auto_gain: bool = True  # raise quiet recordings so you can speak calmly
+    correct_words: bool = True  # fix near-misses of your app/folder names ("power be eye" -> Power BI)
     # Words Whisper is nudged towards, so "Power BI" is not heard as "power be eye".
     hint_words: list[str] = Field(
         default_factory=lambda: [
@@ -103,7 +106,7 @@ class VoiceSettings(BaseModel):
     output_device: int | str | None = None
     min_speech_seconds: float = Field(0.3, ge=0)
     max_record_seconds: float = Field(30.0, gt=1)
-    silence_peak: float = Field(0.01, ge=0, le=1)  # quieter than this counts as "no sound"
+    silence_peak: float = Field(0.004, ge=0, le=1)  # quieter than this counts as "no sound"
     models_dir: str = "data/models"
     stt: SttSettings = Field(default_factory=SttSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
@@ -127,7 +130,8 @@ class MemorySettings(BaseModel):
 
 class UiSettings(BaseModel):
     greeting_name: str = Field("boss", max_length=40)   # what the dashboard calls you
-    greet_on_start: bool = True                         # say hello when the dashboard opens
+    greet_on_start: bool = True  # say hello when the dashboard opens
+    briefing_max: int = Field(2, ge=0, le=5)  # reminders read out at start (0 = none); the rest are counted
     speak_typed_replies: bool = True   # read replies aloud even when you typed the command
     weather_refresh_minutes: int = Field(15, ge=1, le=240)
     health_check_seconds: float = Field(10.0, gt=0)
