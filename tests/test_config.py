@@ -120,9 +120,9 @@ def test_tools_section_in_yaml(tmp_path):
     assert tools.enabled is False and tools.always_confirm == ["open_app"]
 
 
-def test_shipped_settings_target_the_focusrite_mic_and_name_fix():
+def test_shipped_settings_have_a_mic_and_the_name_fix():
     settings = load_settings(env={})
-    assert settings.voice.input_device == 2
+    assert settings.voice.input_device is not None  # which number is yours: set in config/settings.yaml
     assert "Travis" in settings.voice.stt.name_aliases
 
 

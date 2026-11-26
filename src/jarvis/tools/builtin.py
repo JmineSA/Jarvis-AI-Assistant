@@ -176,8 +176,6 @@ def build_registry(
     )
     known = ", ".join(profile.labels("apps"))
     menu = startmenu or StartMenu()
-    if startmenu is None and os.name == "nt":
-        menu.prewarm()  # read the installed-programs list in the background
     registry.register(
         Tool(
             name="open_app",

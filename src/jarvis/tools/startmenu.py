@@ -100,12 +100,14 @@ class StartMenu:
 
     def __init__(
         self,
-        folders: Callable[[], list[Path]] = shortcut_folders,
-        store_reader: Callable[[], list[dict]] = _store_apps_via_powershell,
+        folders: Callable[[], list[Path]] | None = None,
+        store_reader: Callable[[], list[dict]] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._folders = folders
-        self._store_reader = store_reader
+        # Looked up when used (not when defined) so tests can switch the real Windows lookup off.
+        self._folders = folders or (lambda: shortcut_folders())
+        self._store_reader = store_reader or (lambda: _store_apps_via_powershell())
+        self._scan_lock = threading.Lock()
         self._clock = clock
         self._lock = threading.Lock()
         self._apps: list[StartApp] = []
@@ -115,14 +117,18 @@ class StartMenu:
         with self._lock:
             if self._at is not None and self._clock() - self._at < CACHE_SECONDS:
                 return self._apps
-        shortcuts = scan_shortcuts(self._folders())
-        store = scan_store_apps(self._store_reader)
-        merged: dict[str, StartApp] = {}
-        for app in (*shortcuts, *store):  # shortcuts win over a store entry of the same name
-            merged.setdefault(app.name.lower(), app)
-        with self._lock:
-            self._apps, self._at = sorted(merged.values(), key=lambda a: a.name.lower()), self._clock()
-            return self._apps
+        with self._scan_lock:  # one scan at a time: others wait for it instead of starting their own
+            with self._lock:
+                if self._at is not None and self._clock() - self._at < CACHE_SECONDS:
+                    return self._apps
+            shortcuts = scan_shortcuts(self._folders())
+            store = scan_store_apps(self._store_reader)
+            merged: dict[str, StartApp] = {}
+            for app in (*shortcuts, *store):  # shortcuts win over a store entry of the same name
+                merged.setdefault(app.name.lower(), app)
+            with self._lock:
+                self._apps, self._at = sorted(merged.values(), key=lambda a: a.name.lower()), self._clock()
+                return self._apps
 
     def prewarm(self) -> None:
         threading.Thread(target=self.apps, name="jarvis-startmenu", daemon=True).start()

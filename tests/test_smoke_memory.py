@@ -66,8 +66,7 @@ async def test_remember_remind_recall_forget_and_fire(settings, tmp_path):
     await client.aclose()
 
 
-def test_tests_never_touch_the_real_database():
+def test_tests_never_touch_the_real_database(real_db_unchanged):
     """Your own data/jarvis.db may exist; the tests just must not create or change it."""
-    from conftest import REAL_DB_AT_START, real_db_state  # pytest loads tests/conftest.py under this name
-
-    assert real_db_state() == REAL_DB_AT_START
+    same, before, now = real_db_unchanged()
+    assert same, f"a test created or changed data/jarvis.db (before {before}, now {now})"

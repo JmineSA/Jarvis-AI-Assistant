@@ -15,6 +15,26 @@ def real_db_state():
 REAL_DB_AT_START = real_db_state()  # taken when pytest starts, before any test runs
 
 
+@pytest.fixture(scope="session", autouse=True)
+def real_db_unchanged():
+    """Returns a check that your real data/jarvis.db is exactly as it was before any test ran."""
+    before = real_db_state()
+
+    def check():
+        return real_db_state() == before, before, real_db_state()
+
+    return check
+
+
+@pytest.fixture(autouse=True)
+def _no_real_start_menu_lookup(monkeypatch):
+    """Tests never read this computer's Start menu or start PowerShell."""
+    from jarvis.tools import startmenu
+
+    monkeypatch.setattr(startmenu, "shortcut_folders", lambda env=None: [])
+    monkeypatch.setattr(startmenu, "_store_apps_via_powershell", lambda: [])
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     # Tests must never touch the real data/jarvis.db.
