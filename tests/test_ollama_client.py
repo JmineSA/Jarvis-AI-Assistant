@@ -205,3 +205,74 @@ def test_parse_tool_calls_is_forgiving():
     calls = parse_tool_calls(raw)
     assert [(c.name, c.arguments) for c in calls] == [("a", {"x": 1}), ("b", {}), ("c", {})]
     assert parse_tool_calls(None) == () and parse_tool_calls("x") == ()
+
+
+# ------------------------------------------------------------------ speed features
+
+
+def _client(handler, **kwargs):
+    return OllamaClient("http://ollama.test", "qwen2.5:3b-instruct", transport=httpx.MockTransport(handler), **kwargs)
+
+
+async def test_requests_keep_the_model_loaded_and_cap_the_reply():
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": "hi"}})
+
+    await _client(handler, keep_alive="30m", num_predict=200).chat([{"role": "user", "content": "x"}])
+    assert seen[0]["keep_alive"] == "30m" and seen[0]["options"]["num_predict"] == 200
+
+
+async def test_timing_is_read_from_the_reply():
+    body = {
+        "message": {"content": "hi"}, "total_duration": 2_500_000_000, "load_duration": 100_000_000,
+        "prompt_eval_count": 1800, "prompt_eval_duration": 1_200_000_000,
+        "eval_count": 20, "eval_duration": 900_000_000,
+    }
+    client = _client(lambda r: httpx.Response(200, json=body))
+    await client.chat([{"role": "user", "content": "x"}])
+    stats = client.last_stats
+    assert stats.total_s == 2.5 and stats.prompt_tokens == 1800 and stats.output_tokens == 20
+    assert "1800 tokens" in stats.summary()
+
+
+async def test_missing_timing_fields_are_fine():
+    client = _client(lambda r: httpx.Response(200, json={"message": {"content": "hi"}}))
+    await client.chat([{"role": "user", "content": "x"}])
+    assert client.last_stats.total_s == 0.0
+
+
+async def test_warm_up_asks_for_one_token_and_never_raises():
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": ""}})
+
+    await _client(handler).warm_up([{"role": "user", "content": "Hello."}], [{"type": "function"}])
+    assert seen[0]["options"]["num_predict"] == 1 and seen[0]["tools"]
+
+    def down(request):
+        raise httpx.ConnectError("no")
+
+    await _client(down).warm_up([{"role": "user", "content": "Hello."}])  # must not raise
+
+
+@pytest.mark.parametrize(
+    ("size", "vram", "expected"),
+    [(2000, 2000, "GPU 100%"), (2000, 1000, "GPU 50% / CPU 50%"), (2000, 0, "CPU")],
+)
+async def test_processor_says_where_the_model_runs(size, vram, expected):
+    body = {"models": [{"name": "qwen2.5:3b-instruct", "size": size, "size_vram": vram}]}
+    assert await _client(lambda r: httpx.Response(200, json=body)).processor() == expected
+
+
+async def test_processor_is_none_when_not_loaded_or_unreachable():
+    assert await _client(lambda r: httpx.Response(200, json={"models": []})).processor() is None
+
+    def down(request):
+        raise httpx.ConnectError("no")
+
+    assert await _client(down).processor() is None

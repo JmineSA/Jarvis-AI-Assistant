@@ -75,11 +75,13 @@ class Location(BaseModel):
     name: str
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
+    address: str = Field("", max_length=200)  # your home address, used for maps and directions
 
 
 class MusicEntry(BaseModel):
     folder: str = ""         # the folder that holds your albums
     player: str = "vlc"      # key of the app (under `apps`) that plays them
+    online: Literal["youtube_music", "youtube", "local"] = "youtube_music"  # what "play X" uses when online
 
 
 class Profile(BaseModel):

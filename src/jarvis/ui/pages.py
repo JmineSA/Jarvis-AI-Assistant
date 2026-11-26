@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -18,6 +21,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QTableWidget,
@@ -26,7 +30,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from jarvis.audio_devices import (
+    AudioDevice,
+    list_devices,
+    loudest,
+    measure_levels,
+    play_test_tone,
+)
+from jarvis.config import resolve_config_path
+from jarvis.diagnostics import build_diagnostics
+from jarvis.geocode import Place, find_place
 from jarvis.profile import expand_path
+from jarvis.saving import save_audio_device, save_greeting_name, save_home_address
 from jarvis.timeparse import format_due
 from jarvis.tools.apps import find_executable
 from jarvis.ui import theme
@@ -94,6 +109,7 @@ class CommandCenterPage(QWidget):
         super().__init__(parent)
         self.engine = engine
         self._recent: list[tuple[str, str, float]] = []  # tool name, status, when
+        self._model_info = ""
         self._health = (False, "Checking...")
         self._voice = (False, "Starting...")
 
@@ -123,6 +139,7 @@ class CommandCenterPage(QWidget):
             title.setStyleSheet("font-weight:600;")
             value = QLabel("-")
             value.setStyleSheet(f"color:{color};font-size:11px;")
+            value.setWordWrap(True)
             text.addWidget(title)
             text.addWidget(value)
             card.row.addLayout(text, 1)
@@ -343,9 +360,15 @@ class CommandCenterPage(QWidget):
         detail.setText(text)
         detail.setToolTip(text)
 
+    def set_model_info(self, text: str) -> None:
+        self._model_info = text
+        self._refresh_overview()
+
     def _refresh_overview(self) -> None:
         ready, detail = self._health
-        self._overview_values["llm"].setText(f"{self.engine.settings.ollama.model} · online" if ready else detail)
+        info = f" · {self._model_info}" if self._model_info else ""
+        self._overview_values["llm"].setText(f"{self.engine.settings.ollama.model}{info}" if ready else detail)
+        self._overview_values["llm"].setToolTip(self._model_info)
         voice_ready, voice_detail = self._voice
         self._overview_values["voice"].setText("Whisper + Piper ready" if voice_ready else voice_detail)
         self._overview_values["tools"].setText(f"{len(self.engine.tool_names)} loaded")
@@ -835,18 +858,113 @@ class AppsPage(QWidget):
 
 
 class SettingsPage(QWidget):
-    def __init__(self, engine: Engine, parent: QWidget | None = None) -> None:
+    """Your name, your home, your microphone and speakers, and where the files live."""
+
+    _finished = Signal(str, object)   # (what finished, its result) from a background thread
+
+    def __init__(
+        self,
+        engine: Engine,
+        parent: QWidget | None = None,
+        *,
+        devices: Callable[[], tuple[list[AudioDevice], list[AudioDevice]]] = list_devices,
+        measure: Callable[[list[AudioDevice]], dict[int, float]] = measure_levels,
+        tone: Callable[[int | str | None], None] = play_test_tone,
+        geocode: Callable[[str], Place | None] = find_place,
+        config_path: Path | None = None,
+        build_report: Callable[[], str] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.engine = engine
+        self._devices = devices
+        self._measure = measure
+        self._tone = tone
+        self._geocode = geocode
+        self._config_path = config_path or resolve_config_path()
+        self._build_report = build_report or (lambda: build_diagnostics(engine.settings, engine))
+        self._inputs: list[AudioDevice] = []
+        self._outputs: list[AudioDevice] = []
+        self._finished.connect(self._on_finished)
         settings = engine.settings
-        root = QVBoxLayout(self)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer.addWidget(scroll)
+        host = QWidget()
+        scroll.setWidget(host)
+        root = QVBoxLayout(host)
         root.setContentsMargins(24, 16, 24, 16)
         root.setSpacing(12)
         title = QLabel("SETTINGS")
         title.setObjectName("pageTitle")
         root.addWidget(title)
-        root.addWidget(muted("Settings live in plain files, so you can see exactly what they say. Changes apply the next time you start JARVIS."))
+        root.addWidget(muted("Settings live in plain files, so you can see exactly what they say."))
 
+        # ---- you and your home
+        you = Panel("You and your home", "saved to your settings and profile files")
+        self.name_input = QLineEdit(settings.ui.greeting_name)
+        self.name_input.setPlaceholderText("What should JARVIS call you?")
+        self.name_input.setAccessibleName("Name JARVIS calls you")
+        self.name_input.returnPressed.connect(self.save_name)
+        save_name = QPushButton("Save name")
+        save_name.setObjectName("primary")
+        save_name.clicked.connect(self.save_name)
+        you.body.addLayout(self._form_row("Call me", self.name_input, save_name))
+
+        location = engine.profile.location
+        self.address_input = QLineEdit(location.address if location else "")
+        self.address_input.setPlaceholderText("e.g. 6365 Nellmapius Drive, Nellmapius, Pretoria")
+        self.address_input.setAccessibleName("Home address")
+        self.address_input.returnPressed.connect(self.save_address)
+        save_address = QPushButton("Save address")
+        save_address.setObjectName("primary")
+        save_address.clicked.connect(self.save_address)
+        you.body.addLayout(self._form_row("Home address", self.address_input, save_address))
+        you.body.addWidget(muted(
+            'Used for "find a pharmacy near me" and "directions to ...". It stays in profile.yaml on this PC; '
+            "only the suburb name is looked up for the weather, never the street.", "dim",
+        ))
+        self.you_status = muted("", "muted")
+        you.body.addWidget(self.you_status)
+        root.addWidget(you)
+
+        # ---- audio
+        audio = Panel("Microphone and speakers", "applies right away")
+        self.input_combo = QComboBox()
+        self.input_combo.setAccessibleName("Microphone")
+        self.output_combo = QComboBox()
+        self.output_combo.setAccessibleName("Speakers")
+        self.detect_button = QPushButton("Detect microphone")
+        self.detect_button.clicked.connect(self.detect_microphone)
+        self.tone_button = QPushButton("Test speakers")
+        self.tone_button.clicked.connect(self.test_speakers)
+        audio.body.addLayout(self._form_row("Microphone", self.input_combo, self.detect_button))
+        audio.body.addLayout(self._form_row("Speakers", self.output_combo, self.tone_button))
+        self.levels_host = QVBoxLayout()
+        self.levels_host.setSpacing(4)
+        audio.body.addLayout(self.levels_host)
+        buttons = QHBoxLayout()
+        self.apply_audio = QPushButton("Use these devices")
+        self.apply_audio.setObjectName("primary")
+        self.apply_audio.clicked.connect(self.save_devices)
+        refresh = QPushButton("Refresh list")
+        refresh.clicked.connect(self.load_devices)
+        buttons.addWidget(self.apply_audio)
+        buttons.addWidget(refresh)
+        buttons.addStretch(1)
+        audio.body.addLayout(buttons)
+        audio.body.addWidget(muted(
+            "Detect: make a sound into the microphone you want (tap it or speak) and press the button. "
+            "JARVIS listens on every microphone for a moment and picks the one that heard you.", "dim",
+        ))
+        self.audio_status = muted("", "muted")
+        audio.body.addWidget(self.audio_status)
+        root.addWidget(audio)
+
+        # ---- current settings
         panel = Panel("Current settings")
         voice = settings.voice
         rows = [
@@ -854,12 +972,12 @@ class SettingsPage(QWidget):
             ("Speech recognition", f"Whisper {voice.stt.model} on the CPU"),
             ("Voice", f"Piper {voice.tts.voice}"),
             ("Push to talk", voice.push_to_talk_key),
-            ("Microphone device", "system default" if voice.input_device is None else str(voice.input_device)),
             ("Memory", "on" if settings.memory.enabled else "off"),
-            ("Store conversations", "yes" if settings.memory.save_conversations else "no"),
             ("Speak typed replies", "yes" if settings.ui.speak_typed_replies else "no"),
+            ("Quick commands (skip the model)", "on" if settings.brain.fast_commands else "off"),
             ("Memory database", str(settings.resolve_database_path())),
             ("Profile file", str(settings.resolve_profile_path())),
+            ("Settings file", str(self._config_path)),
             ("Logs", str(settings.resolve_log_dir())),
         ]
         grid = QGridLayout()
@@ -875,19 +993,26 @@ class SettingsPage(QWidget):
         panel.body.addLayout(grid)
         root.addWidget(panel)
 
-        buttons = QHBoxLayout()
+        files = QHBoxLayout()
         profile_path = settings.resolve_profile_path()
         for text, path in (
             ("Open profile.yaml", profile_path),
-            ("Open settings.yaml", profile_path.with_name("settings.yaml")),
+            ("Open settings.yaml", self._config_path),
             ("Open logs folder", settings.resolve_log_dir()),
             ("Open data folder", settings.resolve_database_path().parent),
         ):
             button = QPushButton(text)
             button.clicked.connect(lambda _=False, p=path: open_local(p))
-            buttons.addWidget(button)
-        buttons.addStretch(1)
-        root.addLayout(buttons)
+            files.addWidget(button)
+        self.copy_button = QPushButton("Copy diagnostics")
+        self.copy_button.setObjectName("primary")
+        self.copy_button.setToolTip("Copies a report you can paste to get help. It includes recent log lines.")
+        self.copy_button.clicked.connect(self.copy_diagnostics)
+        files.addWidget(self.copy_button)
+        files.addStretch(1)
+        root.addLayout(files)
+        self.diag_status = muted("", "muted")
+        root.addWidget(self.diag_status)
 
         safety = Panel("What JARVIS will never do")
         for line in (
@@ -899,3 +1024,155 @@ class SettingsPage(QWidget):
             safety.body.addWidget(muted(line))
         root.addWidget(safety)
         root.addStretch(1)
+        self.load_devices()
+
+    @staticmethod
+    def _form_row(label: str, field: QWidget, button: QWidget) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        name = muted(label, "muted")
+        name.setFixedWidth(110)
+        row.addWidget(name)
+        row.addWidget(field, 1)
+        row.addWidget(button)
+        return row
+
+    # ------------------------------------------------------------------ background work
+
+    def _background(self, key: str, work: Callable[[], object]) -> None:
+        def run() -> None:
+            try:
+                result: object = work()
+            except Exception as exc:  # noqa: BLE001 - shown to the user, never raised on the UI thread
+                result = exc
+            self._finished.emit(key, result)
+
+        threading.Thread(target=run, name=f"jarvis-settings-{key}", daemon=True).start()
+
+    def _on_finished(self, key: str, result: object) -> None:
+        if key == "address":
+            self._address_done(result)
+        elif key == "detect":
+            self._detect_done(result)
+        elif key == "tone":
+            self.tone_button.setEnabled(True)
+            self.audio_status.setText(f"Couldn't play a sound there: {result}" if isinstance(result, Exception) else "Did you hear it?")
+
+    # ------------------------------------------------------------------ name and address
+
+    def save_name(self) -> None:
+        try:
+            name = save_greeting_name(self._config_path, self.name_input.text())
+        except (ValueError, OSError) as exc:
+            self.you_status.setText(str(exc))
+            return
+        self.engine.settings.ui.greeting_name = name
+        self.name_input.setText(name)
+        self.you_status.setText(f'Saved. I\'ll call you {name} when the dashboard opens.')
+
+    def save_address(self) -> None:
+        text = self.address_input.text()
+        self.you_status.setText("Saving...")
+        profile_path = self.engine.settings.resolve_profile_path()
+        self._background("address", lambda: save_home_address(profile_path, text, self._geocode))
+
+    def _address_done(self, result: object) -> None:
+        if isinstance(result, Exception):
+            self.you_status.setText(str(result))
+            return
+        message, place = result  # type: ignore[misc]
+        location = self.engine.profile.location
+        text = " ".join(self.address_input.text().split())
+        if location is not None:
+            location.address = text
+            if place is not None:
+                location.name = place.name.split(",")[0]
+                location.latitude = round(place.latitude, 4)
+                location.longitude = round(place.longitude, 4)
+        self.you_status.setText(message)
+
+    # ------------------------------------------------------------------ audio
+
+    def load_devices(self) -> None:
+        self._inputs, self._outputs = self._devices()
+        voice = self.engine.settings.voice
+        for combo, items, current in (
+            (self.input_combo, self._inputs, voice.input_device),
+            (self.output_combo, self._outputs, voice.output_device),
+        ):
+            combo.clear()
+            combo.addItem("System default", None)
+            for device in items:
+                combo.addItem(device.label, device.index)
+            position = combo.findData(current if isinstance(current, int) else None)
+            combo.setCurrentIndex(max(position, 0))
+        if not self._inputs and not self._outputs:
+            self.audio_status.setText("I couldn't list your audio devices. Is the audio system available?")
+        else:
+            self.audio_status.setText(f"{len(self._inputs)} microphones and {len(self._outputs)} outputs found.")
+
+    def detect_microphone(self) -> None:
+        if not self._inputs:
+            self.audio_status.setText("No microphones to listen on.")
+            return
+        self.detect_button.setEnabled(False)
+        self.audio_status.setText("Listening on each microphone... make a sound now.")
+        inputs = list(self._inputs)
+        self._background("detect", lambda: self._measure(inputs))
+
+    def _detect_done(self, result: object) -> None:
+        self.detect_button.setEnabled(True)
+        clear_layout(self.levels_host)
+        if isinstance(result, Exception):
+            self.audio_status.setText(f"I couldn't listen: {result}")
+            return
+        levels: dict[int, float] = result  # type: ignore[assignment]
+        names = {d.index: d.name for d in self._inputs}
+        for index, level in sorted(levels.items(), key=lambda item: item[1], reverse=True):
+            row = QHBoxLayout()
+            label = QLabel(f"{index} · {names.get(index, '?')}")
+            label.setFixedWidth(340)
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(min(100, int(level * 200)))
+            bar.setTextVisible(False)
+            bar.setFixedHeight(8)
+            row.addWidget(label)
+            row.addWidget(bar, 1)
+            holder = QWidget()
+            holder.setLayout(row)
+            self.levels_host.addWidget(holder)
+        winner = loudest(levels)
+        if winner is None:
+            self.audio_status.setText("I couldn't tell which microphone has sound. Try again a little louder, one microphone at a time.")
+            return
+        self.input_combo.setCurrentIndex(max(0, self.input_combo.findData(winner)))
+        self.audio_status.setText(f"Heard you on {names.get(winner, winner)}. Press \"Use these devices\" to switch to it.")
+
+    def test_speakers(self) -> None:
+        device = self.output_combo.currentData()
+        self.tone_button.setEnabled(False)
+        self.audio_status.setText("Playing a short tone...")
+        self._background("tone", lambda: self._tone(device))
+
+    def save_devices(self) -> None:
+        mic = self.input_combo.currentData()
+        speakers = self.output_combo.currentData()
+        try:
+            save_audio_device(self._config_path, "input", mic)
+            save_audio_device(self._config_path, "output", speakers)
+        except (ValueError, OSError) as exc:
+            self.audio_status.setText(str(exc))
+            return
+        voice = self.engine.settings.voice
+        voice.input_device = mic
+        voice.output_device = speakers
+        self.engine.restart_voice()
+        self.audio_status.setText("Saved. Restarting the voice with these devices (a few seconds).")
+
+    # ------------------------------------------------------------------ diagnostics
+
+    def copy_diagnostics(self) -> None:
+        report = self._build_report()
+        QGuiApplication.clipboard().setText(report)
+        self.diag_status.setText(f"Copied {len(report.splitlines())} lines. Paste them into the chat.")

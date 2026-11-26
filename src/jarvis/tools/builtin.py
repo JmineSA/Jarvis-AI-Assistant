@@ -18,6 +18,9 @@ from jarvis.tools.apps import (
 )
 from jarvis.tools.files import ListFilesArgs, make_list_files
 from jarvis.tools.launcher import Launcher, SystemLauncher
+from jarvis.tools.maps import MapsArgs, make_maps
+from jarvis.tools.media import PlayMediaArgs, make_play_media
+from jarvis.tools.mediakeys import KeySender, MediaControlArgs, make_media_control
 from jarvis.tools.memory_tools import (
     CancelReminderArgs,
     ForgetArgs,
@@ -32,7 +35,6 @@ from jarvis.tools.memory_tools import (
     make_remember,
     make_set_reminder,
 )
-from jarvis.tools.media import PlayMediaArgs, make_play_media
 from jarvis.tools.registry import Tool, ToolRegistry
 from jarvis.tools.system import NoArgs, make_current_time, make_system_status
 from jarvis.tools.weather import WeatherArgs, make_weather
@@ -152,6 +154,7 @@ def build_registry(
     clock: Callable[[], datetime] = datetime.now,
     store: MemoryStore | None = None,
     session_id: str | None = None,
+    media_keys: KeySender | None = None,
 ) -> ToolRegistry:
     launcher = launcher or SystemLauncher()
     registry = ToolRegistry()
@@ -244,6 +247,29 @@ def build_registry(
     )
     registry.register(
         Tool(
+            name="maps",
+            description=(
+                "Open Google Maps to find a place near the user's home (search) or to get directions "
+                "from their home to a place (directions)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": _text_property("The place or thing, e.g. 'police station' or 'Menlyn Park'"),
+                    "mode": {
+                        "type": "string",
+                        "enum": ["search", "directions"],
+                        "description": "search = find places near home; directions = route from home to the place.",
+                    },
+                },
+                "required": ["query"],
+            },
+            args_model=MapsArgs,
+            run=make_maps(profile, launcher),
+        )
+    )
+    registry.register(
+        Tool(
             name="compose_email",
             description="Open a Gmail draft for the user to read and send. It never sends anything.",
             parameters={
@@ -258,23 +284,49 @@ def build_registry(
             run=make_compose_email(profile, launcher),
         )
     )
-    if profile.music.folder:
-        registry.register(
-            Tool(
-                name="play_media",
-                description="Play an album or song from the user's music folder in the media player.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "name": _text_property(
-                            "The album, artist or song, e.g. 'Kendrick Lamar GNX'. Leave empty to play the whole music folder."
-                        )
+    registry.register(
+        Tool(
+            name="play_media",
+            description=(
+                "Play music. Local songs play in the media player from the user's music folder; "
+                "YouTube Music and YouTube play in the browser. With no source it tries the music folder first."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": _text_property(
+                        "The song, album or artist, e.g. 'Love Me by Lil Wayne'. Leave empty to play the whole music folder."
+                    ),
+                    "source": {
+                        "type": "string",
+                        "enum": ["auto", "local", "youtube_music", "youtube"],
+                        "description": "Where to play it. Use auto unless the user names YouTube Music, YouTube, VLC or their music folder.",
                     },
                 },
-                args_model=PlayMediaArgs,
-                run=make_play_media(profile, launcher),
-            )
+            },
+            args_model=PlayMediaArgs,
+            run=make_play_media(profile, launcher),
         )
+    )
+    registry.register(
+        Tool(
+            name="media_control",
+            description="Pause, resume, skip to the next or previous track, stop, mute or change the volume of the music.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["play_pause", "next", "previous", "stop", "volume_up", "volume_down", "mute"],
+                        "description": "pause and resume are both play_pause",
+                    }
+                },
+                "required": ["action"],
+            },
+            args_model=MediaControlArgs,
+            run=make_media_control(media_keys),
+        )
+    )
     if profile.location is not None:
         registry.register(
             Tool(

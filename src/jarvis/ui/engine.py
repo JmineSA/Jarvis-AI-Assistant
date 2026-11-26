@@ -13,6 +13,7 @@ import asyncio
 import itertools
 import logging
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -24,6 +25,7 @@ from jarvis.memory.store import MemoryStore
 from jarvis.orchestrator import LLM_DOWN_SPEECH, State, VoiceAssistant
 from jarvis.profile import Profile
 from jarvis.reminders import ReminderScheduler
+from jarvis.tools.media import hint_names
 from jarvis.tools.registry import ToolResult
 from jarvis.tools.weather import current_chip, fetch_forecast
 from jarvis.voice.interfaces import Trigger, VoiceError
@@ -137,6 +139,7 @@ class Engine(QObject):
     healthChanged = Signal(bool, str)        # language model ready?, detail
     voiceChanged = Signal(bool, str)         # voice ready?, detail
     weatherChanged = Signal(str)             # e.g. "24° Partly cloudy"
+    modelInfoChanged = Signal(str)           # e.g. "GPU 100% · last reply 2.1 s"
 
     def __init__(
         self,
@@ -170,6 +173,9 @@ class Engine(QObject):
         self._pending: dict[int, asyncio.Future[bool]] = {}
         self._ids = itertools.count(1)
         self._started = False
+        self._processor = ""
+        self._greeted = False
+        self._last_reply = ""
         self._voice_announced = False
 
     # ------------------------------------------------------------------ lifecycle
@@ -183,13 +189,20 @@ class Engine(QObject):
     def voice_active(self) -> bool:
         return self._assistant is not None
 
+    def greeting_text(self) -> str:
+        name = self.settings.ui.greeting_name.strip() or "boss"
+        return f"Hi {name}, how can I help?"
+
     def start(self) -> None:
         if self._started:
             return
         self._started = True
+        if self.settings.ui.greet_on_start and not self._use_voice:
+            self.messageAdded.emit("assistant", self.greeting_text())
         self._loop_thread = threading.Thread(target=self._run_loop, name="jarvis-brain", daemon=True)
         self._loop_thread.start()
         self._spawn(self._health_loop())
+        self._spawn(self._warm_up())
         if self.profile.location is not None:
             self._spawn(self._weather_loop())
         if self.store is not None:
@@ -202,6 +215,23 @@ class Engine(QObject):
             self._voice_thread.start()
         else:
             self.voiceChanged.emit(False, "Voice is off (text only)")
+
+    def restart_voice(self) -> None:
+        """Use new microphone/speakers: restart the voice part. The window stays open."""
+        if not self._use_voice or not self._started:
+            return
+
+        def work() -> None:
+            if self._assistant is not None:
+                self._assistant.stop()
+            if self._voice_thread is not None:
+                self._voice_thread.join(timeout=5)
+            self._voice_announced = False
+            self.voiceChanged.emit(False, "Restarting voice...")
+            self._voice_thread = threading.Thread(target=self._run_voice, name="jarvis-voice", daemon=True)
+            self._voice_thread.start()
+
+        threading.Thread(target=work, name="jarvis-voice-restart", daemon=True).start()
 
     def stop(self) -> None:
         if not self._started:
@@ -289,11 +319,34 @@ class Engine(QObject):
 
     # ------------------------------------------------------------------ turns
 
+    async def _respond(self, text: str) -> str:
+        """Ask the brain, and tell the dashboard how long it took and whether the model was needed."""
+        started = time.monotonic()
+        reply = await self.brain.respond(text, confirm=self._confirm)
+        seconds = time.monotonic() - started
+        note = " (instant, no model)" if self.brain.last_route == "fast" else ""
+        self._last_reply = f"{seconds:.1f} s{note}"
+        self._emit_model_info()
+        return reply
+
+    def _emit_model_info(self) -> None:
+        parts = [p for p in (self._processor, f"last reply {self._last_reply}" if self._last_reply else "") if p]
+        if parts:
+            self.modelInfoChanged.emit(" · ".join(parts))
+
+    async def _warm_up(self) -> None:
+        """Load the model before the first question so the first answer is quick."""
+        await self.brain.warm_up()
+        processor = getattr(self.client, "processor", None)
+        if processor is not None:
+            self._processor = (await processor()) or ""
+            self._emit_model_info()
+
     async def _text_turn(self, text: str) -> None:
         self.messageAdded.emit("user", text)
         self.stateChanged.emit("thinking")
         try:
-            reply = await self.brain.respond(text, confirm=self._confirm)
+            reply = await self._respond(text)
         except OllamaError as exc:
             logger.error("Model error: %s", exc)
             self.messageAdded.emit("system", str(exc))
@@ -369,7 +422,7 @@ class Engine(QObject):
     def _run_voice(self) -> None:
         """Runs on its own thread: the push-to-talk loop."""
         try:
-            hints = self.profile.spoken_names()
+            hints = [*self.profile.spoken_names(), *hint_names(self.profile)]
             if self._voice_builder is not None:
                 stack = self._voice_builder(self.settings, hints)
             else:
@@ -389,9 +442,7 @@ class Engine(QObject):
         self._trigger = ButtonTrigger(stack.trigger)
 
         def respond(text: str) -> str:
-            return asyncio.run_coroutine_threadsafe(
-                self.brain.respond(text, confirm=self._confirm), self._loop
-            ).result()
+            return asyncio.run_coroutine_threadsafe(self._respond(text), self._loop).result()
 
         def on_state(state: State) -> None:
             self.stateChanged.emit(STATE_NAMES.get(state, "idle"))
@@ -416,6 +467,9 @@ class Engine(QObject):
             silence_peak=voice.silence_peak,
         )
         self._assistant = assistant
+        if self.settings.ui.greet_on_start and not self._greeted:
+            self._greeted = True
+            assistant.say(self.greeting_text())  # spoken once the speech models have loaded
         try:
             assistant.run()
         except VoiceError as exc:

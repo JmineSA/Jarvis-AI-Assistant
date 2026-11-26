@@ -11,7 +11,7 @@ A modular, local, voice-controlled personal AI assistant for Windows, built step
 | 3 | Validated tools (open apps and folders, CPU/RAM, date/time, list files) | Built: needs testing on your PC |
 | 4 | SQLite memory: facts, past conversations, reminders | Built: needs testing on your PC |
 | 5 | Weather, web search, Gmail drafts, music in VLC, app finder | Built: needs testing on your PC |
-| 6 | Desktop dashboard (PySide6) | Planned |
+| 6 | Desktop dashboard (PySide6) | Done |
 
 ## Architecture in one minute
 
@@ -201,6 +201,40 @@ python -m jarvis app --no-voice      # window only, type commands
 - The GPU gauge reads `nvidia-smi`; it shows n/a if that isn't available.
 
 If you unzip over an existing project, **merge** `config/profile.yaml` instead of overwriting it, so your own apps and paths stay.
+
+## Speed and music fixes (Phase 6.1)
+
+**Why the GPU hit 100% and replies were slow:** every question made the model re-read about 2,000 tokens of instructions. Now:
+- The start of the prompt never changes, so Ollama reuses its cached copy. The date and time are added after your words instead of at the top.
+- The model is loaded when the app starts and stays loaded (`ollama.keep_alive`), so the first answer is quick.
+- Replies are capped (`ollama.num_predict`) and only the last 4 exchanges are remembered (`brain.max_history_turns`).
+- **Obvious commands skip the model entirely** (`brain.fast_commands`): open an app/folder/site, play music, weather, time, system status, search, remember, remind. They answer in milliseconds. Anything else goes to the model as before. Set `fast_commands: false` to turn this off.
+- The dashboard's *Language model* card shows `GPU 100%` (or `CPU`) and the time of the last reply. "instant" means the model wasn't needed.
+
+`python -m jarvis speed-check` times the model, shows whether it runs on the GPU, and prints plain advice.
+
+**Music**
+- `play music` plays your whole music folder, shuffled, in VLC.
+- `play <song>`: when you are **online** it plays the top YouTube Music result (your main streaming site; change it with `music.online` in `profile.yaml`: `youtube_music`, `youtube` or `local`). When you are **offline**, or YouTube can't be reached, it plays from your music folder.
+- Say where explicitly: `play X on YouTube Music`, `play X on YouTube`, `play X in VLC` / `from my music folder`.
+- YouTube Music opens the top result's page. If Chrome blocks autoplay the first time, press play once.
+- `python -m jarvis music-check` shows what JARVIS finds in your music folder. Add words to test a song without playing it: `python -m jarvis music-check love me lil wayne`.
+- Fix the folder path under `music:` in `config/profile.yaml`. Use single quotes: `'G:\Music'`.
+
+## Name, home, devices and controls (Phase 6.2)
+
+- **Greeting:** the dashboard says "Hi boss, how can I help?" when it opens. Change the name in Settings (or `ui.greeting_name`); turn it off with `ui.greet_on_start: false`.
+- **Home address:** type it in Settings. "Find a pharmacy near me", "check police stations around my area" and "directions to Menlyn Park" open Google Maps from your home. The address stays in `profile.yaml`; only the suburb name is looked up (online, once) to move the weather location, never the street.
+- **Microphone and speakers:** pick them in Settings. *Detect microphone* listens on every input for a moment and selects the one that heard you; *Test speakers* plays a short tone; *Use these devices* saves and restarts the voice without closing the window.
+- **Music controls:** "pause", "resume", "next song", "previous track", "stop the music", "volume up/down", "mute". These press the same media keys as your keyboard (only that fixed list), so they control VLC and YouTube Music.
+- **Better hearing of names:** artist and album folder names from your music folder are given to the speech recogniser as hints.
+- **Copy diagnostics** (Settings) copies a report to paste when asking for help. It lists settings, devices and recent log lines, and never includes your address.
+- **YouTube Music autoplay:** if Chrome opens the song but doesn't start it, allow sound for the site once: Chrome, Settings, Privacy and security, Site settings, Sound, add `music.youtube.com` to "Allowed to play sound".
+
+## Launcher and "which one?" (Phase 6.3)
+
+- **One-click start:** double-click `start-jarvis.bat` (no console window). Right-click it, *Send to > Desktop (create shortcut)* to get a desktop icon, or pin it to the taskbar. If something goes wrong, use `start-jarvis-console.bat`, which keeps the window open so you can read the error.
+- **Answering "which one?":** when a song name matches several things, JARVIS lists up to three, numbered. Reply with "the second one", "2", or part of the name. Saying "cancel" or anything unrelated drops the question.
 
 ## Test
 

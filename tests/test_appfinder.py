@@ -34,7 +34,7 @@ def programs(tmp_path):
     return root
 
 
-def find(query, programs, registry=lambda: []):
+def find(query, programs, registry=list):
     return find_programs(query, roots=[programs], registry=registry)
 
 

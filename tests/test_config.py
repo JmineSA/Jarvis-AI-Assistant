@@ -121,7 +121,7 @@ def test_tools_section_in_yaml(tmp_path):
 
 def test_shipped_settings_target_the_focusrite_mic_and_name_fix():
     settings = load_settings(env={})
-    assert settings.voice.input_device == 3
+    assert settings.voice.input_device == 2
     assert "Travis" in settings.voice.stt.name_aliases
 
 

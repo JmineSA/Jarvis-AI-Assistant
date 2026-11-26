@@ -43,7 +43,7 @@ def _build_tool_prompt(who: str) -> str:
         "user asks for detail.\n"
         "You can act only by calling the tools you are given. When the user asks you to "
         "open something, look inside a folder, check the computer's status, tell the "
-        "time, give the weather, search the web, play music or write an email, call the "
+        "time, give the weather, search the web, play music, find places nearby, get directions or write an email, call the "
         "matching tool. For ordinary conversation and questions, just answer without a "
         "tool.\n"
         "Never say or imply that you opened, started, checked or changed anything unless "

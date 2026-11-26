@@ -20,18 +20,34 @@ def store(tmp_path):
 # --------------------------------------------------------------------------- context
 
 
-def test_context_has_the_date_and_saved_facts_oldest_first(store):
+def test_context_has_saved_facts_oldest_first_and_no_clock(store):
     store.add_fact("First fact")
     store.add_fact("Second fact")
-    text = make_context(store, "Lesiba", 20, clock=lambda: datetime(2026, 11, 24, 16, 45))()
-    assert "Tuesday, 24 November 2026, 16:45" in text
+    text = make_context(store, "Lesiba", 20)()
+    assert "16:45" not in text and "Current date" not in text  # keeps the prompt start unchanging
     assert "What you know about Lesiba" in text
     assert text.index("First fact") < text.index("Second fact")
 
 
-def test_context_without_facts_is_just_the_date(store):
-    text = make_context(store, None, 20)()
-    assert text.startswith("Current date and time:") and "What you know" not in text
+def test_context_without_facts_is_empty(store):
+    assert make_context(store, None, 20)() == ""
+
+
+def test_clock_note_is_the_date_and_time():
+    from jarvis.wiring import make_clock_note
+
+    note = make_clock_note(clock=lambda: datetime(2026, 11, 24, 16, 45))()
+    assert note == "It is Tuesday, 24 November 2026, 16:45."
+
+
+async def test_the_time_goes_after_the_users_words_not_in_the_system_prompt(fake_client_cls, settings, store):
+    client = fake_client_cls(["Hello."])
+    brain = _full_brain(settings, client, store)
+    await brain.respond("hello there")
+    messages = client.calls[-1]
+    assert "It is " not in messages[0]["content"]
+    assert messages[-1]["content"].startswith("hello there") and "It is " in messages[-1]["content"]
+    assert brain.history[0]["content"] == "hello there"  # history keeps only what was said
 
 
 def test_context_respects_the_fact_limit(store):
@@ -117,6 +133,7 @@ async def test_a_failed_model_call_saves_nothing(fake_client_cls, store):
 
 
 def _full_brain(settings, client, store):
+    settings.brain.fast_commands = False  # these tests exercise the model path
     return build_brain(settings, client, profile=Profile(owner_name="Lesiba"), store=store)
 
 

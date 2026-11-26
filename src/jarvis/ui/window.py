@@ -110,6 +110,7 @@ class MainWindow(QMainWindow):
         engine.healthChanged.connect(self.set_health)
         engine.voiceChanged.connect(self.set_voice)
         engine.weatherChanged.connect(self.weather_chip.setText)
+        engine.modelInfoChanged.connect(self.command.set_model_info)
         self._metricsReady.connect(self.command.update_metrics)
 
         self.clock_timer = QTimer(self)
@@ -117,7 +118,7 @@ class MainWindow(QMainWindow):
         self.clock_timer.start(1000)
         self.metrics_timer = QTimer(self)
         self.metrics_timer.timeout.connect(self.poll_metrics)
-        self.metrics_timer.start(1000)
+        self.metrics_timer.start(2000)  # nvidia-smi is a process launch: keep it gentle
         self.update_clock()
         self.show_page("command")
 

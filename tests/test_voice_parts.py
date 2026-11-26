@@ -9,7 +9,6 @@ from jarvis.voice.models import ensure_piper_voice, piper_voice_path
 from jarvis.voice.stt import FasterWhisperTranscriber, build_prompt, is_prompt_echo
 from jarvis.voice.tts import PiperSynthesizer
 
-
 # ------------------------------------------------------------------------------ STT
 
 
@@ -131,7 +130,7 @@ def test_interrupted_download_also_cleans_up(tmp_path):
 
 # ------------------------------------------------------------------ misheard name
 
-from jarvis.voice.stt import fix_assistant_name  # noqa: E402
+from jarvis.voice.stt import fix_assistant_name
 
 ALIASES = ["Travis", "Jervis"]
 

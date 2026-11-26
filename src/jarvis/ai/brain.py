@@ -28,6 +28,36 @@ Message = dict[str, str]
 
 MAX_TOOL_CALLS_PER_TURN = 3
 
+_ORDINALS = {
+    "1": 0, "one": 0, "first": 0, "1st": 0,
+    "2": 1, "two": 1, "second": 1, "2nd": 1,
+    "3": 2, "three": 2, "third": 2, "3rd": 2,
+}
+_CANCEL = re.compile(r"^\W*(?:cancel|never ?mind|forget it|none|stop|no)\W*$", re.IGNORECASE)
+_FILLER_WORDS = {"the", "a", "an", "one", "number", "option", "play", "please", "that", "this", "it", "no", "yes"}
+
+
+def pick_choice(text: str, choices: tuple[tuple[str, dict[str, Any]], ...]) -> int | None:
+    """Which option the user meant ("the second one", "2", part of a title), or None."""
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    if not words:
+        return None
+    for word in words:
+        if word in _ORDINALS and len(words) <= 4 and _ORDINALS[word] < len(choices):
+            return _ORDINALS[word]
+    wanted = [w for w in words if w not in _FILLER_WORDS]
+    if not wanted:
+        return None
+    scores = []
+    for _, args in choices:
+        label = set(re.findall(r"[a-z0-9']+", str(args.get("name", "")).lower()))
+        scores.append(sum(1 for w in wanted if w in label))
+    best = max(scores)
+    if best == 0 or best < len(wanted) * 0.6:
+        return None
+    winners = [i for i, sc in enumerate(scores) if sc == best]
+    return winners[0] if len(winners) == 1 else None
+
 # A reply that starts like "Opening Chrome now" without any tool having run is a false claim.
 _FALSE_ACTION_CLAIM = re.compile(
     r"^\W*(?:(?:sure|certainly|of course|absolutely|okay|ok)\W+)?"
@@ -84,6 +114,8 @@ class Brain:
         context: Callable[[], str] | None = None,
         memory: MemoryStore | None = None,
         session_id: str = "",
+        router: Callable[[str], ToolCall | None] | None = None,
+        turn_note: Callable[[], str] | None = None,
     ) -> None:
         if max_history_turns < 1:
             raise ValueError("max_history_turns must be at least 1")
@@ -94,6 +126,13 @@ class Brain:
         self._context = context      # extra system text each turn (date, saved facts)
         self._memory = memory        # where finished turns are saved
         self._session_id = session_id
+        # Obvious commands ("open VS Code") skip the model: instant, and no GPU work.
+        self._router = router
+        # Changing text (the time) goes after the user's words, so the start of the prompt
+        # stays identical between turns and Ollama can reuse its cached copy of it.
+        self._turn_note = turn_note
+        self.last_route = ""         # "fast" or "model" for the most recent turn
+        self._pending: tuple[str, tuple[tuple[str, dict[str, Any]], ...]] | None = None
         self._history: list[Message] = []
         self._lock = asyncio.Lock()  # one turn at a time keeps history consistent
 
@@ -112,6 +151,7 @@ class Brain:
 
     def reset(self) -> None:
         self._history.clear()
+        self._pending = None
         logger.info("Conversation history cleared.")
 
     async def respond(self, user_text: str, confirm: Confirm | None = None) -> str:
@@ -127,11 +167,34 @@ class Brain:
 
         async with self._lock:
             user_message: Message = {"role": "user", "content": text}
-            messages = [
-                {"role": "system", "content": self._system_text()},
-                *self._history,
-                user_message,
-            ]
+            pending, self._pending = self._pending, None
+            if pending is not None and self._executor is not None:
+                tool_name, choices = pending
+                if _CANCEL.match(text):
+                    reply = "Okay, cancelled."
+                    self._remember_turn(user_message, reply, text)
+                    return reply
+                index = pick_choice(text, choices)
+                if index is not None:
+                    logger.info("Follow-up picked option %d for %s", index + 1, tool_name)
+                    self.last_route = "fast"
+                    outcome = await self._executor.run(tool_name, choices[index][1], confirm)
+                    self._remember_turn(user_message, outcome.message, text)
+                    return outcome.message
+                # Not an answer to the question: treat it as a fresh request.
+            call = self._router(text) if (self._router and self._executor) else None
+            if call is not None and self._executor is not None:
+                logger.info("Fast path: %s %s", call.name, call.arguments)
+                self.last_route = "fast"
+                outcome = await self._executor.run(call.name, call.arguments, confirm)
+                if outcome.choices:
+                    self._pending = (call.name, outcome.choices)
+                reply = outcome.message
+                self._remember_turn(user_message, reply, text)
+                return reply
+
+            self.last_route = "model"
+            messages = self._build_messages(text)
             if self._executor is None:
                 reply = await self._client.chat(messages)
             else:
@@ -142,6 +205,35 @@ class Brain:
             self._save_turn(text, reply)
             logger.info("Turn complete (history: %d messages).", len(self._history))
             return reply
+
+    def _build_messages(self, text: str) -> list[Message]:
+        note = self._note()
+        sent = f"{text}\n\n({note})" if note else text
+        return [
+            {"role": "system", "content": self._system_text()},
+            *self._history,
+            {"role": "user", "content": sent},
+        ]
+
+    def _note(self) -> str:
+        if self._turn_note is None:
+            return ""
+        try:
+            return self._turn_note()
+        except Exception:
+            logger.exception("Could not build the turn note")
+            return ""
+
+    async def warm_up(self) -> None:
+        """Load the model and cache the prompt's fixed start. Safe to call any time; never raises."""
+        warm = getattr(self._client, "warm_up", None)
+        if warm is None:
+            return
+        try:
+            tools = self._executor.registry.schemas() if self._executor else None
+            await warm(self._build_messages("Hello."), tools)
+        except Exception:
+            logger.info("Warm-up failed", exc_info=True)
 
     def _system_text(self) -> str:
         """The system prompt plus live context (the date and what you asked it to remember)."""
@@ -182,9 +274,16 @@ class Brain:
         outcomes: list[str] = []
         for call in calls[:MAX_TOOL_CALLS_PER_TURN]:
             outcome = await executor.run(call.name, call.arguments, confirm)
+            if outcome.choices and len(calls) == 1:
+                self._pending = (call.name, outcome.choices)
             outcomes.append(outcome.message)
         # The reply comes from what the tools really reported, not from the model's words.
         return " ".join(outcomes)
+
+    def _remember_turn(self, user_message: Message, reply: str, text: str) -> None:
+        self._history.extend([user_message, {"role": "assistant", "content": reply}])
+        self._trim()
+        self._save_turn(text, reply)
 
     def _trim(self) -> None:
         excess = len(self._history) - self._max_messages

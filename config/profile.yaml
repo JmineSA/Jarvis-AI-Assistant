@@ -8,15 +8,17 @@ owner_name: Lesiba
 
 # Where you are, for the weather. Only these coordinates are sent to the weather service.
 location:
-  name: Pretoria
-  latitude: -25.7479
-  longitude: 28.2293
+  name: 'Pretoria'
+  latitude: -25.7449
+  longitude: 28.1878
+  address: '7375 Magnesium Crescent, Nellmapius X6,Pretoria'  # your home address: used for maps, "near me" and directions (Settings can edit it)
 
 # Your music: "play <album> in VLC" searches this folder (albums can be one or two levels down).
 music:
   # PLACEHOLDER: change this to the real path of your music folder.
   folder: 'G:\Music'
   player: vlc               # the key of an app below
+  online: youtube_music     # what "play X" uses when you are online (youtube_music, youtube or local); offline it always uses this folder
 
 # Saved contacts for "write an email to <name>". JARVIS only opens a Gmail draft; you press send.
 # contacts:

@@ -54,6 +54,40 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class LlmStats:
+    """What Ollama reports about one request (seconds and token counts)."""
+
+    total_s: float = 0.0
+    load_s: float = 0.0
+    prompt_tokens: int = 0
+    prompt_s: float = 0.0
+    output_tokens: int = 0
+    output_s: float = 0.0
+
+    @classmethod
+    def from_response(cls, data: dict[str, Any]) -> LlmStats:
+        def seconds(key: str) -> float:
+            value = data.get(key)
+            return float(value) / 1e9 if isinstance(value, (int, float)) else 0.0
+
+        def count(key: str) -> int:
+            value = data.get(key)
+            return int(value) if isinstance(value, (int, float)) else 0
+
+        return cls(
+            seconds("total_duration"), seconds("load_duration"),
+            count("prompt_eval_count"), seconds("prompt_eval_duration"),
+            count("eval_count"), seconds("eval_duration"),
+        )
+
+    def summary(self) -> str:
+        return (
+            f"{self.total_s:.1f}s total (load {self.load_s:.1f}s, prompt {self.prompt_tokens} tokens "
+            f"in {self.prompt_s:.1f}s, reply {self.output_tokens} tokens in {self.output_s:.1f}s)"
+        )
+
+
+@dataclass(frozen=True)
 class ChatResult:
     content: str
     tool_calls: tuple[ToolCall, ...] = ()
@@ -93,11 +127,16 @@ class OllamaClient:
         timeout: float = 120.0,
         temperature: float = 0.4,
         num_ctx: int = 4096,
+        keep_alive: str = "30m",
+        num_predict: int = 256,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.model = model
         self._temperature = temperature
         self._num_ctx = num_ctx
+        self._keep_alive = keep_alive
+        self._num_predict = num_predict
+        self.last_stats: LlmStats | None = None
         self._client = httpx.AsyncClient(
             base_url=host,
             timeout=httpx.Timeout(timeout, connect=5.0),
@@ -112,6 +151,8 @@ class OllamaClient:
             timeout=settings.timeout_seconds,
             temperature=settings.temperature,
             num_ctx=settings.num_ctx,
+            keep_alive=settings.keep_alive,
+            num_predict=settings.num_predict,
         )
 
     async def aclose(self) -> None:
@@ -146,7 +187,12 @@ class OllamaClient:
             "model": self.model,
             "messages": messages,
             "stream": stream,
-            "options": {"temperature": self._temperature, "num_ctx": self._num_ctx},
+            "keep_alive": self._keep_alive,
+            "options": {
+                "temperature": self._temperature,
+                "num_ctx": self._num_ctx,
+                "num_predict": self._num_predict,
+            },
         }
 
     def _check_status(self, response: httpx.Response) -> None:
@@ -175,11 +221,15 @@ class OllamaClient:
         self._check_status(response)
 
         try:
-            message = response.json()["message"]
+            body = response.json()
+            message = body["message"]
         except (ValueError, KeyError, TypeError) as exc:
             raise OllamaResponseError("Unexpected response format from Ollama.") from exc
         if not isinstance(message, dict):
             raise OllamaResponseError("Unexpected response format from Ollama.")
+        if isinstance(body, dict):
+            self.last_stats = LlmStats.from_response(body)
+            logger.info("Model: %s", self.last_stats.summary())
         return message
 
     async def chat(self, messages: list[Message]) -> str:
@@ -202,6 +252,38 @@ class OllamaClient:
             content=content.strip() if isinstance(content, str) else "",
             tool_calls=parse_tool_calls(message.get("tool_calls")),
         )
+
+    async def warm_up(self, messages: list[Message], tools: list[dict[str, Any]] | None = None) -> None:
+        """Load the model and cache the fixed start of the prompt, so the first real reply is quick.
+
+        Never raises: if Ollama is not ready, JARVIS simply starts cold.
+        """
+        payload = self._payload(messages, stream=False)
+        payload["options"] = {**payload["options"], "num_predict": 1}
+        if tools:
+            payload["tools"] = tools
+        try:
+            await self._post_chat(payload)
+        except OllamaError as exc:
+            logger.info("Warm-up skipped: %s", exc)
+
+    async def processor(self) -> str | None:
+        """Where the loaded model is running, e.g. "GPU 100%" or "CPU"; None if not loaded."""
+        try:
+            response = await self._client.get("/api/ps")
+            response.raise_for_status()
+            models = response.json().get("models", [])
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return None
+        for item in models:
+            if isinstance(item, dict) and _model_matches(self.model, str(item.get("name", ""))):
+                size = item.get("size") or 0
+                vram = item.get("size_vram") or 0
+                if not size or not vram:
+                    return "CPU"
+                percent = round(100 * vram / size)
+                return f"GPU {percent}%" if percent >= 99 else f"GPU {percent}% / CPU {100 - percent}%"
+        return None
 
     async def chat_stream(self, messages: list[Message]) -> AsyncIterator[str]:
         """Yield the reply in pieces as the model produces it."""

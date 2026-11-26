@@ -4,7 +4,12 @@ import pytest
 
 from jarvis.profile import Profile
 from jarvis.tools.registry import ToolStatus
-from jarvis.tools.web import ComposeEmailArgs, WebSearchArgs, make_compose_email, make_web_search
+from jarvis.tools.web import (
+    ComposeEmailArgs,
+    WebSearchArgs,
+    make_compose_email,
+    make_web_search,
+)
 
 
 class FakeLauncher:
@@ -26,7 +31,7 @@ class FakeLauncher:
         raise AssertionError
 
 
-WHICH = lambda name: f"/bin/{name}"  # noqa: E731
+WHICH = lambda name: f"/bin/{name}"
 
 
 @pytest.fixture

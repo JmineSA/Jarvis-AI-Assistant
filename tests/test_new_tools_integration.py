@@ -1,7 +1,6 @@
 """The shipped profile and the new tools, driven through the real brain and executor."""
 
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
@@ -54,7 +53,8 @@ def test_shipped_registry_offers_every_tool_once(shipped, tmp_path):
 
 def test_music_and_weather_tools_only_appear_when_configured():
     names = build_registry(Profile(), FakeLauncher()).names()
-    assert "weather" not in names and "play_media" not in names
+    assert "weather" not in names
+    assert "play_media" in names  # YouTube Music needs no folder
 
 
 async def test_search_by_voice_end_to_end(settings, fake_client_cls, shipped, monkeypatch):
@@ -69,7 +69,7 @@ async def test_search_by_voice_end_to_end(settings, fake_client_cls, shipped, mo
 
 
 async def test_weather_by_voice_end_to_end(settings, fake_client_cls, shipped, monkeypatch):
-    import jarvis.tools.builtin as builtin
+    from jarvis.tools import builtin
 
     forecast = {
         "current": {"temperature_2m": 25.0, "weather_code": 0},

@@ -83,13 +83,14 @@ async def _chat_loop(settings: Settings) -> int:
 def _run_voice(settings: Settings, use_enter: bool) -> int:
     """Voice conversation: hold the push-to-talk key, speak, release, hear the answer."""
     from jarvis.orchestrator import State, VoiceAssistant
+    from jarvis.tools.media import hint_names
     from jarvis.voice.factory import build_voice_stack
     from jarvis.voice.interfaces import VoiceError
 
     profile = load_user_profile(settings)
     try:
         # Teach the recogniser the names of your own apps, folders and websites.
-        stack = build_voice_stack(settings, use_enter=use_enter, extra_hints=profile.spoken_names())
+        stack = build_voice_stack(settings, use_enter=use_enter, extra_hints=[*profile.spoken_names(), *hint_names(profile)])
     except VoiceError as exc:
         print(f"Voice setup failed: {exc}", file=sys.stderr)
         return 1
@@ -199,14 +200,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app", "app"],
+        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app", "app", "music-check", "speed-check"],
         default="serve",
         help="serve: API server | chat: text chat | voice: talk to JARVIS | "
         "voice-check: test microphone, speakers and recognition | "
         "download-models: fetch speech models | "
         "memory: see and delete what JARVIS remembers (list, search, forget, cancel, wipe-history, wipe) | "
         "add-app: find a program and add it to your profile | "
-        "app: open the desktop dashboard",
+        "app: open the desktop dashboard | "
+        "music-check: see what JARVIS finds in your music folder (add words to test a song) | "
+        "speed-check: time the model and show whether it runs on the GPU",
     )
     parser.add_argument(
         "memory_args",
@@ -261,6 +264,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"The dashboard needs PySide6 ({exc}). Run: pip install -r requirements.txt", file=sys.stderr)
                 return 1
             return run_app(settings, use_voice=not args.no_voice)
+        if args.command == "music-check":
+            from jarvis.diagnostics import run_music_check
+
+            return run_music_check(settings, args.memory_args)
+        if args.command == "speed-check":
+            from jarvis.diagnostics import run_speed_check
+
+            return run_speed_check(settings)
         if args.command == "add-app":
             from jarvis.appfinder import run_add_app
 

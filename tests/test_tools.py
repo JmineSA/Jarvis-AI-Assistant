@@ -285,7 +285,7 @@ def test_system_status_message(monkeypatch):
 
 
 def test_current_time_message():
-    clock = lambda: datetime(2026, 11, 4, 9, 5)  # noqa: E731
+    clock = lambda: datetime(2026, 11, 4, 9, 5)
     assert make_current_time(clock)(NoArgs()).message == "It's 09:05 on Wednesday, 4 November 2026."
 
 
@@ -295,8 +295,8 @@ def test_current_time_message():
 def test_registry_contains_expected_tools_and_schemas(profile):
     registry = build_registry(profile, FakeLauncher())
     assert registry.names() == [
-        "open_app", "open_folder", "list_files", "open_website", "web_search", "compose_email",
-        "system_status", "current_time",
+        "open_app", "open_folder", "list_files", "open_website", "web_search", "maps", "compose_email",
+        "play_media", "media_control", "system_status", "current_time",
     ]
     schemas = {s["function"]["name"]: s["function"] for s in registry.schemas()}
     assert schemas["open_app"]["parameters"]["properties"]["name"]["enum"] == [
@@ -309,4 +309,4 @@ def test_registry_contains_expected_tools_and_schemas(profile):
 def test_empty_profile_only_offers_system_tools():
     registry = build_registry(Profile(), FakeLauncher())
     # No apps, folders, music or location: only the tools that need nothing from the profile.
-    assert registry.names() == ["web_search", "compose_email", "system_status", "current_time"]
+    assert registry.names() == ["web_search", "maps", "compose_email", "play_media", "media_control", "system_status", "current_time"]

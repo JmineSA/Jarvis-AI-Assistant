@@ -133,9 +133,9 @@ def test_text_turn_shows_both_sides_and_stores_them(qapp, engine):
     engine.messageAdded.connect(lambda role, text: seen.append((role, text)))
     engine.start()
     engine.submit_text("hello")
-    assert wait_until(qapp, lambda: len(seen) >= 2)
-    assert seen[0] == ("user", "hello")
-    assert seen[1] == ("assistant", "Good evening.")
+    assert wait_until(qapp, lambda: ("assistant", "Good evening.") in seen)
+    assert seen[0][0] == "assistant" and "how can I help?" in seen[0][1]  # the greeting comes first
+    assert ("user", "hello") in seen
     assert engine.store.counts().messages == 2
 
 
@@ -299,3 +299,173 @@ def test_pages_work_with_memory_off(qapp, settings, fake_client_cls):
     win.metrics_timer.stop()
     win.clock_timer.stop()
     win.close()
+
+
+def test_dashboard_shows_how_the_last_reply_was_made(qapp, engine):
+    seen = []
+    engine.modelInfoChanged.connect(seen.append)
+    engine.start()
+    engine.submit_text("what time is it")
+    assert wait_until(qapp, lambda: any("last reply" in s for s in seen))
+    assert any("instant" in s for s in seen)
+    seen.clear()
+    engine.submit_text("tell me a joke about cats")
+    assert wait_until(qapp, lambda: any("last reply" in s for s in seen))
+    assert not any("instant" in s for s in seen)
+
+
+def test_model_info_reaches_the_language_model_card(window):
+    window.command.set_health(True, "ready")
+    window.command.set_model_info("GPU 100% · last reply 1.2 s")
+    assert "GPU 100%" in window.command._overview_values["llm"].text()
+
+
+# ------------------------------------------------------------------ name, address, devices, diagnostics
+
+
+def test_greeting_uses_the_saved_name(engine):
+    assert engine.greeting_text() == "Hi boss, how can I help?"
+    engine.settings.ui.greeting_name = "Jimmy"
+    assert engine.greeting_text() == "Hi Jimmy, how can I help?"
+
+
+def test_greeting_can_be_turned_off(qapp, settings, fake_client_cls):
+    settings.ui.greet_on_start = False
+    eng = Engine(settings, use_voice=False, client=fake_client_cls())
+    seen = []
+    eng.messageAdded.connect(lambda role, text: seen.append(text))
+    eng.start()
+    eng.stop()
+    assert not any("how can I help" in t for t in seen)
+
+
+class SettingsHarness:
+    def __init__(self, tmp_path, engine, **overrides):
+        import shutil
+
+        from jarvis.audio_devices import AudioDevice
+        from jarvis.geocode import Place
+        from jarvis.ui.pages import SettingsPage
+
+        self.config = tmp_path / "settings.yaml"
+        shutil.copy("config/settings.yaml", self.config)
+        profile = tmp_path / "profile.yaml"
+        shutil.copy("config/profile.yaml", profile)
+        engine.settings.tools.profile_path = str(profile)
+        self.inputs = [AudioDevice(1, "Mic 1"), AudioDevice(2, "Mic 2")]
+        self.outputs = [AudioDevice(0, "Speakers")]
+        self.tones = []
+        self.report_calls = 0
+        self.page = SettingsPage(
+            engine,
+            devices=lambda: (self.inputs, self.outputs),
+            measure=overrides.get("measure", lambda devices: {1: 0.01, 2: 0.5}),
+            tone=self.tones.append,
+            geocode=overrides.get("geocode", lambda address: Place("Nellmapius, Gauteng", -25.7, 28.4)),
+            config_path=self.config,
+            build_report=lambda: "line one\nline two",
+        )
+        self.profile_path = profile
+
+
+@pytest.fixture
+def harness(qapp, engine, tmp_path):
+    return SettingsHarness(tmp_path, engine)
+
+
+def test_saving_the_name_updates_the_file_and_the_live_setting(harness, engine):
+    import yaml
+
+    harness.page.name_input.setText("Jimmy")
+    harness.page.save_name()
+    assert yaml.safe_load(harness.config.read_text(encoding="utf-8"))["ui"]["greeting_name"] == "Jimmy"
+    assert engine.settings.ui.greeting_name == "Jimmy"
+    assert "Jimmy" in harness.page.you_status.text()
+
+
+def test_an_empty_name_is_refused(harness, engine):
+    harness.page.name_input.setText("   ")
+    harness.page.save_name()
+    assert "name" in harness.page.you_status.text().lower()
+    assert engine.settings.ui.greeting_name == "boss"
+
+
+def test_saving_the_address_updates_the_profile_and_live_location(qapp, harness, engine):
+    import yaml
+
+    harness.page.address_input.setText("6365 Nellmapius Drive, Pretoria")
+    harness.page.save_address()
+    assert wait_until(qapp, lambda: "saved" in harness.page.you_status.text())
+    saved = yaml.safe_load(harness.profile_path.read_text(encoding="utf-8"))["location"]
+    assert saved["address"] == "6365 Nellmapius Drive, Pretoria"
+    assert engine.profile.location.address == "6365 Nellmapius Drive, Pretoria"
+    assert engine.profile.location.name == "Nellmapius"
+
+
+def test_devices_fill_the_dropdowns_and_default_is_first(harness):
+    page = harness.page
+    assert [page.input_combo.itemText(i) for i in range(page.input_combo.count())] == [
+        "System default", "1 · Mic 1", "2 · Mic 2",
+    ]
+    assert page.output_combo.itemText(1) == "0 · Speakers"
+
+
+def test_the_current_device_is_preselected(qapp, engine, tmp_path):
+    engine.settings.voice.input_device = 2
+    page = SettingsHarness(tmp_path, engine).page
+    assert page.input_combo.currentData() == 2
+
+
+def test_detect_selects_the_microphone_that_heard_sound(qapp, harness):
+    page = harness.page
+    page.detect_microphone()
+    assert wait_until(qapp, lambda: "Heard you on" in page.audio_status.text())
+    assert page.input_combo.currentData() == 2
+    assert page.levels_host.count() == 2
+
+
+def test_detect_with_silence_says_so_and_changes_nothing(qapp, engine, tmp_path):
+    page = SettingsHarness(tmp_path, engine, measure=lambda d: {1: 0.0, 2: 0.0}).page
+    page.detect_microphone()
+    assert wait_until(qapp, lambda: "couldn't tell" in page.audio_status.text())
+    assert page.input_combo.currentData() is None
+
+
+def test_the_test_tone_goes_to_the_chosen_speakers(qapp, harness):
+    page = harness.page
+    page.output_combo.setCurrentIndex(1)
+    page.test_speakers()
+    assert wait_until(qapp, lambda: page.tone_button.isEnabled())
+    assert harness.tones == [0]
+
+
+def test_using_the_devices_saves_them_and_restarts_the_voice(harness, engine, monkeypatch):
+    import yaml
+
+    restarted = []
+    monkeypatch.setattr(engine, "restart_voice", lambda: restarted.append(True))
+    page = harness.page
+    page.input_combo.setCurrentIndex(2)
+    page.output_combo.setCurrentIndex(1)
+    page.save_devices()
+    voice = yaml.safe_load(harness.config.read_text(encoding="utf-8"))["voice"]
+    assert voice["input_device"] == 2 and voice["output_device"] == 0
+    assert engine.settings.voice.input_device == 2 and restarted == [True]
+
+
+def test_copy_diagnostics_puts_the_report_on_the_clipboard(qapp, harness):
+    harness.page.copy_diagnostics()
+    assert QApplication.clipboard().text() == "line one\nline two"
+    assert "2 lines" in harness.page.diag_status.text()
+
+
+def test_restart_voice_is_a_no_op_without_voice(engine):
+    engine.restart_voice()  # text-only engine: nothing to restart, no error
+
+
+def test_the_diagnostics_report_hides_the_address_and_lists_devices(settings, tmp_path):
+    from jarvis.diagnostics import build_diagnostics
+
+    text = build_diagnostics(settings, None, log_lines=3)
+    assert "JARVIS diagnostics" in text and "Microphones:" in text and "Last 3 log lines" in text
+    assert "Nellmapius" not in text and "Home address:" in text

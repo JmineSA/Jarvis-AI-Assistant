@@ -19,10 +19,7 @@ MAX_FACT_LENGTH = 300
 MAX_MESSAGE_LENGTH = 2000
 
 _STOPWORDS = frozenset(
-    "the and for with that this what when where which who whom how did does about you your "
-    "have has had was were are not but can could would should will just tell told said say "
-    "know remember please anything something any all from into than then them they their "
-    "there here its our out too very".split()
+    ["the", "and", "for", "with", "that", "this", "what", "when", "where", "which", "who", "whom", "how", "did", "does", "about", "you", "your", "have", "has", "had", "was", "were", "are", "not", "but", "can", "could", "would", "should", "will", "just", "tell", "told", "said", "say", "know", "remember", "please", "anything", "something", "any", "all", "from", "into", "than", "then", "them", "they", "their", "there", "here", "its", "our", "out", "too", "very"]
 )
 
 

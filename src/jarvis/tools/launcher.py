@@ -32,7 +32,7 @@ class SystemLauncher:
             extra["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             extra["start_new_session"] = True
-        subprocess.Popen(  # noqa: S603  (argument list, no shell)
+        subprocess.Popen(
             argv,
             cwd=str(cwd) if cwd else None,
             stdin=subprocess.DEVNULL,
@@ -44,7 +44,7 @@ class SystemLauncher:
 
     def open_path(self, path: Path) -> None:
         if os.name == "nt":
-            os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606
+            os.startfile(str(path))  # type: ignore[attr-defined]
         else:
             opener = "open" if sys.platform == "darwin" else "xdg-open"
             self.start([opener, str(path)])

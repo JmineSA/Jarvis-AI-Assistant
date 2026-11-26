@@ -48,10 +48,13 @@ class OllamaSettings(BaseModel):
     timeout_seconds: float = Field(120.0, gt=0)
     temperature: float = Field(0.4, ge=0, le=2)
     num_ctx: int = Field(4096, ge=512)
+    keep_alive: str = "30m"            # how long Ollama keeps the model loaded after a reply
+    num_predict: int = Field(256, ge=16)  # longest reply in tokens: bounds the GPU work per turn
 
 
 class BrainSettings(BaseModel):
     max_history_turns: int = Field(10, ge=1, le=100)
+    fast_commands: bool = True   # answer obvious commands (open, play, weather...) without the model
 
 
 class ApiSettings(BaseModel):
@@ -123,6 +126,8 @@ class MemorySettings(BaseModel):
 
 
 class UiSettings(BaseModel):
+    greeting_name: str = Field("boss", max_length=40)   # what the dashboard calls you
+    greet_on_start: bool = True                         # say hello when the dashboard opens
     speak_typed_replies: bool = True   # read replies aloud even when you typed the command
     weather_refresh_minutes: int = Field(15, ge=1, le=240)
     health_check_seconds: float = Field(10.0, gt=0)
@@ -157,6 +162,12 @@ class Settings(BaseModel):
         """Where downloaded voice and speech models are kept."""
         path = Path(self.voice.models_dir)
         return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def resolve_config_path(env: Mapping[str, str] | None = None) -> Path:
+    """The settings.yaml JARVIS is using (JARVIS_CONFIG if set, else config/settings.yaml)."""
+    explicit = (env if env is not None else os.environ).get("JARVIS_CONFIG")
+    return Path(explicit) if explicit else DEFAULT_CONFIG_PATH
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

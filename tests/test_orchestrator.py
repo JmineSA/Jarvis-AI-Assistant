@@ -1,7 +1,12 @@
 import numpy as np
 
 from jarvis.ai.ollama_client import OllamaUnavailableError
-from jarvis.orchestrator import GENERIC_ERROR_SPEECH, LLM_DOWN_SPEECH, State, VoiceAssistant
+from jarvis.orchestrator import (
+    GENERIC_ERROR_SPEECH,
+    LLM_DOWN_SPEECH,
+    State,
+    VoiceAssistant,
+)
 from jarvis.voice.interfaces import SAMPLE_RATE, AudioClip, VoiceError
 
 

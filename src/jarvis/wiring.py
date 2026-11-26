@@ -9,11 +9,13 @@ from datetime import datetime
 
 from jarvis.ai.brain import Brain, ChatClient
 from jarvis.ai.prompts import SYSTEM_PROMPT, build_tool_system_prompt
+from jarvis.ai.router import CommandRouter
 from jarvis.config import Settings
 from jarvis.memory.store import MemoryStore
 from jarvis.profile import Profile, load_profile
 from jarvis.tools.builtin import build_registry
 from jarvis.tools.executor import ToolExecutor
+from jarvis.tools.media import prewarm as prewarm_music
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +48,14 @@ def make_context(
     max_facts: int,
     clock: Callable[[], datetime] = datetime.now,
 ) -> Callable[[], str]:
-    """Text added to the system prompt every turn: the date and time, and saved facts."""
+    """Text added to the system prompt every turn: what you asked it to remember.
+
+    The date and time are NOT here (see make_clock_note): text that changes every minute would
+    force the model to re-read the whole prompt on every request.
+    """
 
     def context() -> str:
-        now = clock()
-        lines = [f"Current date and time: {now:%A}, {now.day} {now:%B %Y}, {now:%H:%M}."]
+        lines: list[str] = []
         facts = store.list_facts(max_facts) if max_facts > 0 else []
         if facts:
             who = owner_name or "the user"
@@ -59,6 +64,14 @@ def make_context(
         return "\n".join(lines)
 
     return context
+
+
+def make_clock_note(clock: Callable[[], datetime] = datetime.now) -> Callable[[], str]:
+    def note() -> str:
+        now = clock()
+        return f"It is {now:%A}, {now.day} {now:%B %Y}, {now:%H:%M}."
+
+    return note
 
 
 def build_brain(
@@ -83,6 +96,12 @@ def build_brain(
     if unknown:
         logger.warning("always_confirm names tools that do not exist: %s", ", ".join(unknown))
     logger.info("Tools ready: %s", ", ".join(registry.names()))
+    prewarm_music(profile)
+    router = (
+        CommandRouter(profile, registry.names(), aliases=settings.voice.stt.name_aliases)
+        if settings.brain.fast_commands
+        else None
+    )
 
     return Brain(
         client,
@@ -94,4 +113,6 @@ def build_brain(
         else None,
         memory=store if settings.memory.save_conversations else None,
         session_id=session_id,
+        router=router,
+        turn_note=make_clock_note(),
     )

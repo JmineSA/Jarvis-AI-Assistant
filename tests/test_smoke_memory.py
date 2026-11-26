@@ -35,6 +35,7 @@ async def test_remember_remind_recall_forget_and_fire(settings, tmp_path):
         ("recall", {"topic": "LightsOn"}),
         ("forget", {"about": "LightsOn"}),
     )
+    settings.brain.fast_commands = False  # this test drives the model path
     brain = build_brain(settings, client, profile=Profile(owner_name="Lesiba"), store=store)
 
     assert (await brain.respond("remember the LightsOn project is due on 1 December")).startswith("I'll remember")

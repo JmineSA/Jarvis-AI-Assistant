@@ -21,6 +21,8 @@ class ToolStatus(str, Enum):
 class ToolResult:
     status: ToolStatus
     message: str  # plain sentence, safe to speak aloud
+    # Options the user can pick from next turn: (label, arguments for the same tool).
+    choices: tuple[tuple[str, dict[str, Any]], ...] = ()
 
     @classmethod
     def done(cls, message: str) -> ToolResult:

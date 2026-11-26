@@ -6,14 +6,17 @@ ollama:
   timeout_seconds: 120
   temperature: 0.4
   num_ctx: 4096                # context window; keep modest to stay inside VRAM
+  keep_alive: 30m              # keep the model loaded between questions (no reload pause)
+  num_predict: 256             # longest reply, in tokens: limits how long the GPU works
 
 brain:
-  max_history_turns: 10        # one turn = one user message + one assistant reply
+  max_history_turns: 4         # one turn = one user message + one assistant reply (less = faster)
+  fast_commands: true          # obvious commands (open, play, weather...) skip the model
 
 voice:
   push_to_talk_key: right_ctrl # hold to talk. Examples: f8, scroll_lock, ctrl+alt+j
-  input_device: 3              # microphone: your Focusrite input. Find numbers with `voice-check`
-  output_device: null          # speakers: index or part of their name
+  input_device: 1  # microphone: your Focusrite input. Find numbers with `voice-check`
+  output_device: null  # speakers: index or part of their name
   min_speech_seconds: 0.3      # shorter recordings are ignored as accidental taps
   max_record_seconds: 30
   silence_peak: 0.01           # quieter than this = "no sound heard"
@@ -28,7 +31,7 @@ voice:
     name_aliases: [Travis, Jervis, Jarvas, Javis, Jarvus, Jarvice, Gervais]
   tts:
     voice: en_GB-alan-medium   # Piper voice name
-    length_scale: null         # speaking speed: below 1 faster, above 1 slower
+    length_scale: 0.8         # speaking speed: below 1 faster, above 1 slower
 
 tools:
   enabled: true                # false = JARVIS only talks
@@ -52,3 +55,7 @@ logging:
   directory: logs
   max_bytes: 1048576           # rotate at 1 MB
   backup_count: 3
+
+ui:
+  greeting_name: 'Jimmy'  # what the dashboard calls you (also editable in Settings)
+  greet_on_start: true         # say hello when the dashboard opens

@@ -12,7 +12,7 @@ PRETORIA = Location(name="Pretoria", latitude=-25.7479, longitude=28.2293)
 
 
 def forecast():
-    hours = [f"2026-11-{25 + h // 24:02d}T{h % 24:02d}:00" for h in range(0, 72)]
+    hours = [f"2026-11-{25 + h // 24:02d}T{h % 24:02d}:00" for h in range(72)]
     return {
         "current": {"temperature_2m": 24.4, "weather_code": 2},
         "hourly": {
