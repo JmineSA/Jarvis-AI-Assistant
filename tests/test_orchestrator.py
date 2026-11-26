@@ -1,7 +1,12 @@
 import numpy as np
 
 from jarvis.ai.ollama_client import OllamaUnavailableError
-from jarvis.orchestrator import GENERIC_ERROR_SPEECH, LLM_DOWN_SPEECH, State, VoiceAssistant
+from jarvis.orchestrator import (
+    GENERIC_ERROR_SPEECH,
+    LLM_DOWN_SPEECH,
+    State,
+    VoiceAssistant,
+)
 from jarvis.voice.interfaces import SAMPLE_RATE, AudioClip, VoiceError
 
 
@@ -71,8 +76,9 @@ class FakePlayer:
 class FakeTrigger:
     """Scripted push-to-talk. `interrupt_after` makes interrupt_requested() flip to True."""
 
-    def __init__(self, presses=1):
+    def __init__(self, presses=1, timeouts=0):
         self.presses = presses
+        self.timeouts = timeouts  # how many idle polls (None) to return before pressing
         self.started = self.closed = False
         self.interrupt = False
 
@@ -82,7 +88,10 @@ class FakeTrigger:
     def close(self):
         self.closed = True
 
-    def wait_for_press(self, stop):
+    def wait_for_press(self, stop, timeout=None):
+        if self.timeouts > 0:
+            self.timeouts -= 1
+            return None
         if self.presses <= 0 or stop.is_set():
             return False
         self.presses -= 1
@@ -232,3 +241,38 @@ def test_stop_ends_the_loop():
     assistant.stop()
     assistant.run()
     assert trigger.presses == 10  # never consumed a press
+
+
+def test_announcements_are_spoken_while_idle_before_waiting_for_a_press():
+    assistant, parts, messages, _ = build(trigger=FakeTrigger(presses=0, timeouts=2))
+    assistant.say("Reminder: call the bank.")
+    assistant.run()
+    assert parts["synthesizer"].texts == ["Reminder: call the bank."]
+    assert ("assistant", "Reminder: call the bank.") in messages
+
+
+def test_announcement_queued_from_another_thread_is_spoken_on_a_later_poll():
+    import threading
+
+    trigger = FakeTrigger(presses=0, timeouts=3)
+    assistant, parts, *_ = build(trigger=trigger)
+    original = trigger.wait_for_press
+
+    def poll(stop, timeout=None):
+        if trigger.timeouts == 2:  # arrives while JARVIS is idle
+            threading.Thread(target=assistant.say, args=("Reminder: stretch.",)).start()
+        return original(stop, timeout)
+
+    trigger.wait_for_press = poll
+    assistant.run()
+    import time
+
+    time.sleep(0.05)
+    assistant._flush_announcements()
+    assert parts["synthesizer"].texts == ["Reminder: stretch."]
+
+
+def test_idle_polling_does_not_start_a_turn():
+    assistant, parts, messages, _ = build(trigger=FakeTrigger(presses=1, timeouts=3))
+    assistant.run()
+    assert parts["recorder"].started == 1  # only the one real press

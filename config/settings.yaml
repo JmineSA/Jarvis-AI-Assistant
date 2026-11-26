@@ -6,27 +6,48 @@ ollama:
   timeout_seconds: 120
   temperature: 0.4
   num_ctx: 4096                # context window; keep modest to stay inside VRAM
+  keep_alive: 30m              # keep the model loaded between questions (no reload pause)
+  num_predict: 256             # longest reply, in tokens: limits how long the GPU works
 
 brain:
-  max_history_turns: 10        # one turn = one user message + one assistant reply
+  max_history_turns: 4         # one turn = one user message + one assistant reply (less = faster)
+  fast_commands: true          # obvious commands (open, play, weather...) skip the model
 
 voice:
   push_to_talk_key: right_ctrl # hold to talk. Examples: f8, scroll_lock, ctrl+alt+j
-  input_device: 3           # microphone: index or part of its name (see `voice-check`)
+  input_device: 2              # microphone: your Focusrite input. Find numbers with `voice-check`
   output_device: null          # speakers: index or part of their name
   min_speech_seconds: 0.3      # shorter recordings are ignored as accidental taps
   max_record_seconds: 30
-  silence_peak: 0.01           # quieter than this = "no sound heard"
+  silence_peak: 0.004          # quieter than this = "no sound heard" (low, so calm speech counts)
   models_dir: data/models
   stt:
     model: small.en            # faster but less accurate: base.en
     language: en
     compute_type: int8
     cpu_threads: 4
+    beam_size: 3               # 1 = fastest; 3 = a little more accurate (+0.5 s); 5 = more careful still
+    auto_gain: true            # raises quiet recordings, so you can talk calmly
+    correct_words: true        # fixes near-misses of your app/folder names
     hint_words: [JARVIS, Power BI, VS Code, Jupyter, Databricks, Chrome, Ollama]
+    # Mishearings of "JARVIS" at the start of a sentence that are corrected automatically
+    name_aliases: [Travis, Jervis, Jarvas, Javis, Jarvus, Jarvice, Gervais]
   tts:
-    voice: en_GB-alan-medium   # Piper voice name
-    length_scale: null         # speaking speed: below 1 faster, above 1 slower
+    voice: en_GB-northern_english_male-medium  # Piper voice name
+    length_scale: 0.9        # speaking speed: below 1 faster, above 1 slower
+
+tools:
+  enabled: true                # false = JARVIS only talks
+  profile_path: config/profile.yaml   # the apps, folders and websites JARVIS may open
+  always_confirm: []           # tool names that always ask first, e.g. [open_app, open_website]
+  timeout_seconds: 10
+
+memory:
+  enabled: true                # false = JARVIS forgets everything when it stops
+  database_path: data/jarvis.db  # one local file; nothing leaves your computer
+  save_conversations: true     # false = keep only facts and reminders you ask for
+  max_facts_in_prompt: 20      # how many saved facts the model sees each turn
+  reminder_check_seconds: 5
 
 api:
   host: 127.0.0.1              # localhost only
@@ -37,3 +58,8 @@ logging:
   directory: logs
   max_bytes: 1048576           # rotate at 1 MB
   backup_count: 3
+
+ui:
+  greeting_name: boss         # what the dashboard calls you (also editable in Settings)
+  greet_on_start: true         # say hello when the dashboard opens
+  briefing_max: 2              # reminders read out at start; the rest are counted (0 = none)

@@ -97,3 +97,43 @@ def test_models_dir_is_project_relative_by_default():
 def test_relative_log_dir_is_project_relative():
     settings = Settings()
     assert settings.resolve_log_dir().is_absolute()
+
+
+def test_tools_defaults():
+    tools = Settings().tools
+    assert tools.enabled is True
+    assert tools.always_confirm == []
+    assert tools.profile_path == "config/profile.yaml"
+    assert Settings().resolve_profile_path().is_absolute()
+
+
+def test_profile_path_env_override(tmp_path):
+    target = tmp_path / "other.yaml"  # a real absolute path on any OS (Windows has no /tmp)
+    settings = load_settings(env={"JARVIS_PROFILE": str(target)})
+    assert settings.resolve_profile_path() == target
+
+
+def test_tools_section_in_yaml(tmp_path):
+    path = tmp_path / "s.yaml"
+    path.write_text("tools:\n  enabled: false\n  always_confirm: [open_app]\n", encoding="utf-8")
+    tools = load_settings(path, env={}).tools
+    assert tools.enabled is False and tools.always_confirm == ["open_app"]
+
+
+def test_shipped_settings_target_the_focusrite_mic_and_name_fix():
+    settings = load_settings(env={})
+    assert settings.voice.input_device == 2
+    assert "Travis" in settings.voice.stt.name_aliases
+
+
+def test_memory_defaults():
+    memory = Settings().memory
+    assert memory.enabled is True and memory.save_conversations is True
+    assert memory.database_path == "data/jarvis.db"
+    assert Settings().resolve_database_path().is_absolute()
+
+
+def test_database_path_env_override(tmp_path):
+    target = tmp_path / "elsewhere.db"
+    settings = load_settings(env={"JARVIS_DB": str(target)})
+    assert settings.resolve_database_path() == target

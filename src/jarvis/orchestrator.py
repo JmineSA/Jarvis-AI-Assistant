@@ -8,6 +8,7 @@ loop itself is tested with fakes.
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 from collections.abc import Callable
@@ -39,6 +40,8 @@ class State(str, Enum):
 
 StateCallback = Callable[[State], None]
 MessageCallback = Callable[[str, str], None]  # (role, text); role: user | assistant | system
+
+ANNOUNCEMENT_POLL_SECONDS = 0.25  # how often an idle JARVIS checks for reminders to speak
 
 LLM_DOWN_SPEECH = "I'm having trouble reaching my language model."
 GENERIC_ERROR_SPEECH = "I'm afraid something went wrong with that request."
@@ -72,12 +75,20 @@ class VoiceAssistant:
         self._max_record_seconds = max_record_seconds
         self._silence_peak = silence_peak
         self._stop = threading.Event()
+        self._announcements: queue.Queue[str] = queue.Queue()
         self.state = State.IDLE
 
     # ------------------------------------------------------------------ lifecycle
 
     def stop(self) -> None:
         self._stop.set()
+
+    def say(self, text: str) -> None:
+        """Queue something to say (a reminder). Safe to call from any thread.
+
+        It is spoken the next time JARVIS is idle, never in the middle of a conversation.
+        """
+        self._announcements.put(text)
 
     def run(self) -> None:
         """Run until stop() is called. Blocks."""
@@ -88,12 +99,26 @@ class VoiceAssistant:
         try:
             self._set_state(State.IDLE)
             while not self._stop.is_set():
-                if not self.trigger.wait_for_press(self._stop):
+                self._flush_announcements()
+                pressed = self.trigger.wait_for_press(self._stop, ANNOUNCEMENT_POLL_SECONDS)
+                if pressed is None:  # nothing pressed yet: look for reminders again
+                    continue
+                if not pressed:      # stop requested
                     break
                 self.run_turn()
                 self._set_state(State.IDLE)
         finally:
             self.trigger.close()
+            self._set_state(State.IDLE)
+
+    def _flush_announcements(self) -> None:
+        while True:
+            try:
+                text = self._announcements.get_nowait()
+            except queue.Empty:
+                return
+            self._notify("assistant", text)
+            self._speak(text)
             self._set_state(State.IDLE)
 
     def run_turn(self) -> None:

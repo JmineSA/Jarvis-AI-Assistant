@@ -33,6 +33,8 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "JARVIS_OUTPUT_DEVICE": ("voice", "output_device"),
     "JARVIS_STT_MODEL": ("voice", "stt", "model"),
     "JARVIS_TTS_VOICE": ("voice", "tts", "voice"),
+    "JARVIS_PROFILE": ("tools", "profile_path"),
+    "JARVIS_DB": ("memory", "database_path"),
 }
 
 
@@ -46,10 +48,13 @@ class OllamaSettings(BaseModel):
     timeout_seconds: float = Field(120.0, gt=0)
     temperature: float = Field(0.4, ge=0, le=2)
     num_ctx: int = Field(4096, ge=512)
+    keep_alive: str = "30m"            # how long Ollama keeps the model loaded after a reply
+    num_predict: int = Field(256, ge=16)  # longest reply in tokens: bounds the GPU work per turn
 
 
 class BrainSettings(BaseModel):
     max_history_turns: int = Field(10, ge=1, le=100)
+    fast_commands: bool = True   # answer obvious commands (open, play, weather...) without the model
 
 
 class ApiSettings(BaseModel):
@@ -71,10 +76,19 @@ class SttSettings(BaseModel):
     language: str | None = "en"
     compute_type: str = "int8"
     cpu_threads: int = Field(4, ge=0)  # 0 = let the library decide
+    beam_size: int = Field(1, ge=1, le=8)  # 1 = fastest; 3 is a little more accurate and ~0.5 s slower
+    auto_gain: bool = True  # raise quiet recordings so you can speak calmly
+    correct_words: bool = True  # fix near-misses of your app/folder names ("power be eye" -> Power BI)
     # Words Whisper is nudged towards, so "Power BI" is not heard as "power be eye".
     hint_words: list[str] = Field(
         default_factory=lambda: [
             "JARVIS", "Power BI", "VS Code", "Jupyter", "Databricks", "Chrome", "Ollama",
+        ]
+    )
+    # Whisper often mishears the assistant's name at the start of a sentence.
+    name_aliases: list[str] = Field(
+        default_factory=lambda: [
+            "Travis", "Jervis", "Jarvas", "Javis", "Jarvus", "Jarvice", "Gervais",
         ]
     )
 
@@ -92,10 +106,35 @@ class VoiceSettings(BaseModel):
     output_device: int | str | None = None
     min_speech_seconds: float = Field(0.3, ge=0)
     max_record_seconds: float = Field(30.0, gt=1)
-    silence_peak: float = Field(0.01, ge=0, le=1)  # quieter than this counts as "no sound"
+    silence_peak: float = Field(0.004, ge=0, le=1)  # quieter than this counts as "no sound"
     models_dir: str = "data/models"
     stt: SttSettings = Field(default_factory=SttSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
+
+
+class ToolsSettings(BaseModel):
+    enabled: bool = True
+    profile_path: str = "config/profile.yaml"
+    # Tools that must always ask you first, by name (e.g. [open_app]).
+    always_confirm: list[str] = Field(default_factory=list)
+    timeout_seconds: float = Field(10.0, gt=0)
+
+
+class MemorySettings(BaseModel):
+    enabled: bool = True
+    database_path: str = "data/jarvis.db"
+    save_conversations: bool = True       # false = remember facts and reminders only
+    max_facts_in_prompt: int = Field(20, ge=0, le=100)
+    reminder_check_seconds: float = Field(5.0, gt=0)
+
+
+class UiSettings(BaseModel):
+    greeting_name: str = Field("boss", max_length=40)   # what the dashboard calls you
+    greet_on_start: bool = True  # say hello when the dashboard opens
+    briefing_max: int = Field(2, ge=0, le=5)  # reminders read out at start (0 = none); the rest are counted
+    speak_typed_replies: bool = True   # read replies aloud even when you typed the command
+    weather_refresh_minutes: int = Field(15, ge=1, le=240)
+    health_check_seconds: float = Field(10.0, gt=0)
 
 
 class Settings(BaseModel):
@@ -104,6 +143,19 @@ class Settings(BaseModel):
     api: ApiSettings = Field(default_factory=ApiSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
+    tools: ToolsSettings = Field(default_factory=ToolsSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
+    ui: UiSettings = Field(default_factory=UiSettings)
+
+    def resolve_database_path(self) -> Path:
+        """Memory database as an absolute path (relative paths are project-relative)."""
+        path = Path(self.memory.database_path)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+    def resolve_profile_path(self) -> Path:
+        """Profile file as an absolute path (relative paths are project-relative)."""
+        path = Path(self.tools.profile_path)
+        return path if path.is_absolute() else PROJECT_ROOT / path
 
     def resolve_log_dir(self) -> Path:
         """Log directory as an absolute path (relative paths are project-relative)."""
@@ -114,6 +166,12 @@ class Settings(BaseModel):
         """Where downloaded voice and speech models are kept."""
         path = Path(self.voice.models_dir)
         return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def resolve_config_path(env: Mapping[str, str] | None = None) -> Path:
+    """The settings.yaml JARVIS is using (JARVIS_CONFIG if set, else config/settings.yaml)."""
+    explicit = (env if env is not None else os.environ).get("JARVIS_CONFIG")
+    return Path(explicit) if explicit else DEFAULT_CONFIG_PATH
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:

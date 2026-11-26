@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from jarvis.voice.audio_utils import level_speech
+from jarvis.voice.correct import VocabularyCorrector
 from jarvis.voice.interfaces import VoiceError
 
 logger = logging.getLogger(__name__)
@@ -27,6 +30,18 @@ def is_prompt_echo(text: str, prompt: str | None) -> bool:
     return cleaned == prompt.strip().lower().rstrip(".") or cleaned.startswith("vocabulary:")
 
 
+def fix_assistant_name(text: str, aliases: list[str]) -> str:
+    """Turn a misheard name at the start of a sentence into JARVIS ("Hey Travis, ..." -> "Hey JARVIS, ...").
+
+    Only the start of the sentence is touched, so a real "Travis" elsewhere stays as it is.
+    """
+    if not aliases:
+        return text
+    names = "|".join(re.escape(a) for a in aliases)
+    pattern = rf"^(\W*(?:(?:hey|hi|hello|ok|okay)\b[\s,]*)?)(?:{names})\b"
+    return re.sub(pattern, r"\1JARVIS", text, count=1, flags=re.IGNORECASE)
+
+
 class FasterWhisperTranscriber:
     def __init__(
         self,
@@ -36,8 +51,16 @@ class FasterWhisperTranscriber:
         cpu_threads: int = 4,
         download_root: Path | None = None,
         hint_words: list[str] | None = None,
+        name_aliases: list[str] | None = None,
         model_factory: Callable[[], Any] | None = None,
+        beam_size: int = 1,
+        auto_gain: bool = True,
+        correction_terms: list[str] | None = None,
     ) -> None:
+        self._beam_size = beam_size
+        self._auto_gain = auto_gain
+        self._corrector = VocabularyCorrector(correction_terms or [])
+        self._name_aliases = name_aliases or []
         self._model_name = model
         self._language = language
         self._compute_type = compute_type
@@ -75,10 +98,12 @@ class FasterWhisperTranscriber:
 
     def transcribe(self, audio: np.ndarray) -> str:
         model = self._load()
+        if self._auto_gain:
+            audio = level_speech(audio)
         segments, _info = model.transcribe(
             audio.astype(np.float32, copy=False),
             language=self._language,
-            beam_size=1,                      # greedy decoding: fastest on a CPU
+            beam_size=self._beam_size,        # 1 = fastest; 3-5 = a little more accurate, a little slower
             vad_filter=True,                  # drop silence so Whisper does not invent words
             condition_on_previous_text=False,
             initial_prompt=self._prompt,
@@ -86,4 +111,5 @@ class FasterWhisperTranscriber:
         text = " ".join(segment.text.strip() for segment in segments).strip()
         if is_prompt_echo(text, self._prompt):
             return ""
-        return text
+        text = fix_assistant_name(text, self._name_aliases)
+        return self._corrector.correct(text)

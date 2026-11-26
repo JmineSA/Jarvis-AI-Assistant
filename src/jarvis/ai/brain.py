@@ -1,25 +1,108 @@
 """The conversation brain.
 
-Phase 1: keeps an in-memory, trimmed conversation history and asks the model
-for a reply. Later phases add tool selection and SQLite-backed memory here.
-The brain only *reasons*; it never touches the operating system.
+Keeps a trimmed in-memory conversation history and asks the model for a reply.
+When tools are available the model may ask for one; the brain hands the request
+to the executor and answers from the tool's real result, never from the model's
+own claim of what it did. The brain only *reasons*: it never touches the
+operating system itself.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import Protocol
+import re
+import sqlite3
+from collections.abc import Callable
+from typing import Any, Protocol
 
+from jarvis.ai.ollama_client import ChatResult, OllamaResponseError, ToolCall
 from jarvis.ai.prompts import SYSTEM_PROMPT
+from jarvis.memory.store import MemoryStore
+from jarvis.tools.executor import Confirm, ToolExecutor
+from jarvis.tools.registry import ToolStatus
 
 logger = logging.getLogger(__name__)
 
 Message = dict[str, str]
 
+MAX_TOOL_CALLS_PER_TURN = 3
+
+_ORDINALS = {
+    "1": 0, "one": 0, "first": 0, "1st": 0,
+    "2": 1, "two": 1, "second": 1, "2nd": 1,
+    "3": 2, "three": 2, "third": 2, "3rd": 2,
+}
+_CANCEL = re.compile(r"^\W*(?:cancel|never ?mind|forget it|none|stop|no)\W*$", re.IGNORECASE)
+_FILLER_WORDS = {"the", "a", "an", "one", "number", "option", "play", "please", "that", "this", "it", "no", "yes"}
+
+
+def pick_choice(text: str, choices: tuple[tuple[str, dict[str, Any]], ...]) -> int | None:
+    """Which option the user meant ("the second one", "2", part of a title), or None."""
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    if not words:
+        return None
+    for word in words:
+        if word in _ORDINALS and len(words) <= 4 and _ORDINALS[word] < len(choices):
+            return _ORDINALS[word]
+    wanted = [w for w in words if w not in _FILLER_WORDS]
+    if not wanted:
+        return None
+    scores = []
+    for _, args in choices:
+        label = set(re.findall(r"[a-z0-9']+", str(args.get("name", "")).lower()))
+        scores.append(sum(1 for w in wanted if w in label))
+    best = max(scores)
+    if best == 0 or best < len(wanted) * 0.6:
+        return None
+    winners = [i for i, sc in enumerate(scores) if sc == best]
+    return winners[0] if len(winners) == 1 else None
+
+# A reply that starts like "Opening Chrome now" without any tool having run is a false claim.
+_FALSE_ACTION_CLAIM = re.compile(
+    r"^\W*(?:(?:sure|certainly|of course|absolutely|okay|ok)\W+)?"
+    r"(?:(?:i(?:'ve| have|'m| am| will|'ll)|i)\s+)?(?:now\s+)?"
+    r"(?:opened|opening|launched|launching|searching|playing|composing|drafting)\b",
+    re.IGNORECASE,
+)
+# Likewise "I'll remember that" or "Reminder set" when no memory tool ran.
+_FALSE_MEMORY_CLAIM = re.compile(
+    r"^\W*(?:(?:sure|certainly|of course|absolutely|okay|ok)\W+)?"
+    r"(?:i(?:'ll| will|'ve| have)\s+(?:remember|note|noted|save|saved|store|stored|remind|set a reminder)\b"
+    r"|noted\b|reminder (?:set|is set)\b)",
+    re.IGNORECASE,
+)
+NO_TOOL_CHOSEN = (
+    "I haven't actually done that, because I didn't select any of my tools. "
+    "Please say it again, a little shorter, for example: open VS Code, "
+    "or: remember that my project is due on Monday."
+)
+
 
 class ChatClient(Protocol):
     async def chat(self, messages: list[Message]) -> str: ...
+
+    async def chat_with_tools(
+        self, messages: list[Message], tools: list[dict[str, Any]]
+    ) -> ChatResult: ...
+
+
+def _calls_from_text(content: str, executor: ToolExecutor) -> list[ToolCall]:
+    """Small models sometimes write the tool request as JSON text instead of using the tool slot."""
+    text = re.sub(r"</?tool_call>|```(?:json)?", "", content).strip()
+    if not text.startswith(("{", "[")):
+        return []
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return []
+    calls: list[ToolCall] = []
+    for item in data if isinstance(data, list) else [data]:
+        if isinstance(item, dict) and isinstance(item.get("name"), str) and executor.has(item["name"]):
+            arguments = item.get("arguments", item.get("parameters", {}))
+            calls.append(ToolCall(item["name"], arguments if isinstance(arguments, (dict, str)) else {}))
+    return calls
 
 
 class Brain:
@@ -28,14 +111,35 @@ class Brain:
         client: ChatClient,
         system_prompt: str = SYSTEM_PROMPT,
         max_history_turns: int = 10,
+        executor: ToolExecutor | None = None,
+        context: Callable[[], str] | None = None,
+        memory: MemoryStore | None = None,
+        session_id: str = "",
+        router: Callable[[str], ToolCall | None] | None = None,
+        turn_note: Callable[[], str] | None = None,
     ) -> None:
         if max_history_turns < 1:
             raise ValueError("max_history_turns must be at least 1")
         self._client = client
         self._system_prompt = system_prompt
         self._max_messages = max_history_turns * 2
+        self._executor = executor
+        self._context = context      # extra system text each turn (date, saved facts)
+        self._memory = memory        # where finished turns are saved
+        self._session_id = session_id
+        # Obvious commands ("open VS Code") skip the model: instant, and no GPU work.
+        self._router = router
+        # Changing text (the time) goes after the user's words, so the start of the prompt
+        # stays identical between turns and Ollama can reuse its cached copy of it.
+        self._turn_note = turn_note
+        self.last_route = ""         # "fast" or "model" for the most recent turn
+        self._pending: tuple[str, tuple[tuple[str, dict[str, Any]], ...]] | None = None
         self._history: list[Message] = []
         self._lock = asyncio.Lock()  # one turn at a time keeps history consistent
+
+    @property
+    def executor(self) -> ToolExecutor | None:
+        return self._executor
 
     @property
     def history(self) -> list[Message]:
@@ -48,13 +152,15 @@ class Brain:
 
     def reset(self) -> None:
         self._history.clear()
+        self._pending = None
         logger.info("Conversation history cleared.")
 
-    async def respond(self, user_text: str) -> str:
+    async def respond(self, user_text: str, confirm: Confirm | None = None) -> str:
         """Process one user message and return the assistant's reply.
 
-        If the model call fails, the history is left untouched so a retry
-        does not duplicate the user's message.
+        `confirm` is asked before any tool that needs your approval. If the model
+        call fails, the history is left untouched so a retry does not duplicate
+        the user's message.
         """
         text = user_text.strip()
         if not text:
@@ -62,17 +168,129 @@ class Brain:
 
         async with self._lock:
             user_message: Message = {"role": "user", "content": text}
-            messages = [
-                {"role": "system", "content": self._system_prompt},
-                *self._history,
-                user_message,
-            ]
-            reply = await self._client.chat(messages)
+            pending, self._pending = self._pending, None
+            if pending is not None and self._executor is not None:
+                tool_name, choices = pending
+                if _CANCEL.match(text):
+                    reply = "Okay, cancelled."
+                    self._remember_turn(user_message, reply, text)
+                    return reply
+                index = pick_choice(text, choices)
+                if index is not None:
+                    logger.info("Follow-up picked option %d for %s", index + 1, tool_name)
+                    self.last_route = "fast"
+                    outcome = await self._executor.run(tool_name, choices[index][1], confirm)
+                    self._remember_turn(user_message, outcome.message, text)
+                    return outcome.message
+                # Not an answer to the question: treat it as a fresh request.
+            planned = self._router(text) if (self._router and self._executor) else None
+            if planned is not None and self._executor is not None:
+                steps = planned if isinstance(planned, list) else [planned]
+                self.last_route = "fast"
+                messages_out: list[str] = []
+                for step in steps:
+                    logger.info("Fast path: %s %s", step.name, step.arguments)
+                    outcome = await self._executor.run(step.name, step.arguments, confirm)
+                    messages_out.append(outcome.message)
+                    if outcome.choices:
+                        self._pending = (step.name, outcome.choices)
+                    if outcome.status is not ToolStatus.LAUNCHED and outcome.status is not ToolStatus.DONE:
+                        break  # do not carry on with the next step after one that did not work
+                reply = " ".join(messages_out)
+                self._remember_turn(user_message, reply, text)
+                return reply
+
+            self.last_route = "model"
+            messages = self._build_messages(text)
+            if self._executor is None:
+                reply = await self._client.chat(messages)
+            else:
+                reply = await self._respond_with_tools(messages, self._executor, confirm)
 
             self._history.extend([user_message, {"role": "assistant", "content": reply}])
             self._trim()
+            self._save_turn(text, reply)
             logger.info("Turn complete (history: %d messages).", len(self._history))
             return reply
+
+    def _build_messages(self, text: str) -> list[Message]:
+        note = self._note()
+        sent = f"{text}\n\n({note})" if note else text
+        return [
+            {"role": "system", "content": self._system_text()},
+            *self._history,
+            {"role": "user", "content": sent},
+        ]
+
+    def _note(self) -> str:
+        if self._turn_note is None:
+            return ""
+        try:
+            return self._turn_note()
+        except Exception:
+            logger.exception("Could not build the turn note")
+            return ""
+
+    async def warm_up(self) -> None:
+        """Load the model and cache the prompt's fixed start. Safe to call any time; never raises."""
+        warm = getattr(self._client, "warm_up", None)
+        if warm is None:
+            return
+        try:
+            tools = self._executor.registry.schemas() if self._executor else None
+            await warm(self._build_messages("Hello."), tools)
+        except Exception:
+            logger.info("Warm-up failed", exc_info=True)
+
+    def _system_text(self) -> str:
+        """The system prompt plus live context (the date and what you asked it to remember)."""
+        if self._context is None:
+            return self._system_prompt
+        try:
+            extra = self._context()
+        except Exception:
+            logger.exception("Could not build the memory context")
+            return self._system_prompt
+        return f"{self._system_prompt}\n\n{extra}" if extra else self._system_prompt
+
+    def _save_turn(self, user_text: str, reply: str) -> None:
+        """Keep the exchange in long-term memory. Memory trouble never breaks a conversation."""
+        if self._memory is None:
+            return
+        try:
+            self._memory.add_message(self._session_id, "user", user_text)
+            self._memory.add_message(self._session_id, "assistant", reply)
+        except (sqlite3.Error, OSError):
+            logger.exception("Could not save the conversation to memory")
+
+    async def _respond_with_tools(
+        self, messages: list[Message], executor: ToolExecutor, confirm: Confirm | None
+    ) -> str:
+        result = await self._client.chat_with_tools(messages, executor.registry.schemas())
+        calls = list(result.tool_calls) or _calls_from_text(result.content, executor)
+
+        if not calls:
+            reply = result.content.strip()
+            if not reply:
+                raise OllamaResponseError("Ollama returned an empty reply.")
+            if _FALSE_ACTION_CLAIM.match(reply) or _FALSE_MEMORY_CLAIM.match(reply):
+                logger.warning("Model claimed an action without calling a tool: %r", reply)
+                return NO_TOOL_CHOSEN
+            return reply
+
+        outcomes: list[str] = []
+        for call in calls[:MAX_TOOL_CALLS_PER_TURN]:
+            outcome = await executor.run(call.name, call.arguments, confirm)
+            if outcome.choices and len(calls) == 1:
+                self._pending = (call.name, outcome.choices)
+            outcomes.append(outcome.message)
+        # The reply comes from what the tools really reported, not from the model's words.
+        return " ".join(outcomes)
+
+    def _remember_turn(self, user_message: Message, reply: str, text: str) -> None:
+        self._history.extend([user_message, {"role": "assistant", "content": reply}])
+        self._trim()
+        self._save_turn(text, reply)
 
     def _trim(self) -> None:
         excess = len(self._history) - self._max_messages

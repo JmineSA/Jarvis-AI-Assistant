@@ -9,7 +9,6 @@ from jarvis.voice.models import ensure_piper_voice, piper_voice_path
 from jarvis.voice.stt import FasterWhisperTranscriber, build_prompt, is_prompt_echo
 from jarvis.voice.tts import PiperSynthesizer
 
-
 # ------------------------------------------------------------------------------ STT
 
 
@@ -127,3 +126,42 @@ def test_interrupted_download_also_cleans_up(tmp_path):
     with pytest.raises(KeyboardInterrupt):
         ensure_piper_voice(tmp_path, "en_GB-alan-medium", downloader)
     assert not piper_voice_path(tmp_path, "en_GB-alan-medium").exists()
+
+
+# ------------------------------------------------------------------ misheard name
+
+from jarvis.voice.stt import fix_assistant_name
+
+ALIASES = ["Travis", "Jervis"]
+
+
+@pytest.mark.parametrize(
+    "heard, fixed",
+    [
+        ("Travis, what can you do?", "JARVIS, what can you do?"),
+        ("Hey Travis open Chrome", "Hey JARVIS open Chrome"),
+        ("hello jervis, what time is it", "hello JARVIS, what time is it"),
+        ("Travis", "JARVIS"),
+        ("  Okay, Travis open Power BI", "  Okay, JARVIS open Power BI"),
+    ],
+)
+def test_misheard_name_at_the_start_is_corrected(heard, fixed):
+    assert fix_assistant_name(heard, ALIASES) == fixed
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["I met Travis yesterday", "Open Chrome, Travis", "Travisty is not a name", "What is Jarvis?"],
+)
+def test_other_text_is_left_alone(text):
+    assert fix_assistant_name(text, ALIASES) == text
+
+
+def test_no_aliases_changes_nothing():
+    assert fix_assistant_name("Travis, hi", []) == "Travis, hi"
+
+
+def test_transcriber_applies_the_name_fix():
+    model = FakeWhisper(["Travis, open VS Code."])
+    stt = FasterWhisperTranscriber(name_aliases=["Travis"], model_factory=lambda: model)
+    assert stt.transcribe(np.zeros(16000, dtype=np.float32)) == "JARVIS, open VS Code."
