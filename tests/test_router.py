@@ -344,3 +344,9 @@ def test_email_commands_are_read_only_checks(text, args):
 
 def test_email_phrases_do_nothing_without_the_tool():
     assert CommandRouter(Profile(), {"open_app"})("check my email") is None
+
+
+@pytest.mark.parametrize("phrase", ["how much memory am I using", "how much ram do I have", "cpu usage", "is my pc slow"])
+def test_memory_questions_go_to_system_status(route, phrase):
+    call = route(phrase)
+    assert call is not None and call.name == "system_status"

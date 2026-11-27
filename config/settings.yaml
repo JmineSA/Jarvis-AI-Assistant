@@ -22,7 +22,7 @@ voice:
   silence_peak: 0.004          # quieter than this = "no sound heard" (low, so calm speech counts)
   models_dir: data/models
   ack_sound: true              # a soft tick when you stop talking, so you know it heard you
-  wake_word: false             # say "Hey JARVIS" instead of holding the key. Turn on with `python -m jarvis wake-setup`
+  wake_word: true  # say "Hey JARVIS" instead of holding the key. Turn on with `python -m jarvis wake-setup`
   wake_threshold: 0.5          # lower (0.3) if it misses you, higher (0.7) if it wakes by itself
   wake_silence_seconds: 1.2    # how long a quiet gap ends your sentence after a wake
   wake_reply: "I'm listening."   # said after "Hey JARVIS" (empty = just a beep)
@@ -71,3 +71,6 @@ ui:
   greeting_name: boss         # what the dashboard calls you (also editable in Settings)
   greet_on_start: true         # say hello when the dashboard opens
   briefing_max: 2              # reminders read out at start; the rest are counted (0 = none)
+
+gmail:
+  enabled: true

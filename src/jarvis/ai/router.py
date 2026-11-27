@@ -100,7 +100,10 @@ _TIME = re.compile(
 )
 _STATUS = re.compile(
     r"^(?:system\s+status|(?:check|show)\s+(?:my\s+|the\s+)?(?:system|pc|computer)(?:\s+status)?|"
-    r"how(?:'s|\s+is)\s+(?:my|the)\s+(?:pc|computer|system)(?:\s+doing)?)$",
+    r"how(?:'s|\s+is)\s+(?:my|the)\s+(?:pc|computer|system)(?:\s+doing)?|"
+    r"how\s+much\s+(?:memory|ram|cpu|disk(?:\s+space)?|battery)(?:\s+(?:am\s+i|is\s+(?:my\s+\w+\s+)?|do\s+i\s+have)\s*\w*(?:\s+\w+){0,2})?|"
+    r"(?:what(?:'s|\s+is)\s+)?(?:my\s+)?(?:cpu|ram|memory|disk|battery)\s+(?:usage|level|status)|"
+    r"is\s+my\s+(?:pc|computer)\s+(?:slow|lagging|ok(?:ay)?))$",
     re.IGNORECASE,
 )
 _SEARCH = re.compile(r"^(?:search|google|look\s+up|find)\s+(?P<rest>.+)$", re.IGNORECASE)
@@ -167,6 +170,17 @@ _EMAIL = re.compile(
     r"|(?:do\s+i\s+have|are\s+there|have\s+i\s+got|any)\s+(?:any\s+)?(?:new\s+|unread\s+)?(?:e-?mails?|mail|messages?)"
     r"|what(?:'s|\s+is)\s+in\s+my\s+(?:inbox|mail|gmail))"
     r"(?:\s+(?:from|by)\s+(?P<sender>[\w .'-]{2,40}?))?\s*[?.!]?$",
+    re.IGNORECASE,
+)
+_EMAIL_SENT = re.compile(
+    r"^(?:please\s+)?(?:(?:check|show|read|see|what(?:'s|\s+is|\s+was))\s+)?(?:me\s+)?(?:my\s+)?"
+    r"(?:(?:last|latest|recent|newest)\s+(?:(?P<n>\d+)\s+)?(?:e-?mails?|messages?)\s+(?:i\s+)?sent|(?:sent\s+(?:e-?mails?|mail|folder|items))|(?:e-?mails?\s+i\s+sent))"
+    r"(?:\s+to\s+(?P<who>[\w .'-]{2,40}?))?\s*[?.!]?$",
+    re.IGNORECASE,
+)
+_EMAIL_SPAM = re.compile(
+    r"^(?:please\s+)?(?:(?:check|show|read|see|open|what(?:'s|\s+is)\s+in)\s+)?(?:me\s+)?(?:my\s+)?(?:the\s+)?"
+    r"(?:spam|junk)(?:\s+(?:folder|mail|e-?mails?|box))?(?:\s+(?:from|by)\s+(?P<who>[\w .'-]{2,40}?))?\s*[?.!]?$",
     re.IGNORECASE,
 )
 _REMIND = re.compile(r"^remind\s+me\s+(?P<rest>.+)$", re.IGNORECASE)
@@ -491,10 +505,26 @@ class CommandRouter:
         """"Check my email", "any new emails from Sam", "read my last 5 emails" (read-only)."""
         if "check_email" not in self._tools:
             return None
+        sent = _EMAIL_SENT.match(command)
+        if sent:
+            args = {"folder": "sent", "unread_only": False}
+            if sent.group("n"):
+                args["count"] = int(sent.group("n"))
+            else:
+                args["count"] = 1 if re.search(r"\b(?:last|latest|newest)\s+(?:e-?mail|message)\b", command, re.IGNORECASE) else 3
+            if sent.group("who"):
+                args["sender"] = sent.group("who").strip()
+            return ToolCall("check_email", args)
+        spam = _EMAIL_SPAM.match(command)
+        if spam:
+            args = {"folder": "spam", "unread_only": False}
+            if spam.group("who"):
+                args["sender"] = spam.group("who").strip()
+            return ToolCall("check_email", args)
         match = _EMAIL.match(command)
         if not match:
             return None
-        args: dict[str, object] = {}
+        args = {}
         words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
         number = (match.group("n") or "").lower()
         if number:

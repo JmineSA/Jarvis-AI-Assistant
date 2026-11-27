@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
 MAX_SHOWN = 10
+FOLDERS = {"inbox": "INBOX", "sent": "SENT", "spam": "SPAM"}  # what you can ask about; all read-only
 
 
 class GmailError(Exception):
@@ -228,26 +229,36 @@ class GmailClient:
         except (httpx.HTTPError, ValueError) as exc:
             raise GmailError("I can't reach Gmail right now. Are you online?") from exc
 
-    def check(self, count: int = 3, unread_only: bool = True, sender: str = "") -> tuple[int | None, list[MailSummary]]:
-        """(unread count in the inbox, the newest matching messages: sender, subject, date only)."""
+    def check(
+        self, count: int = 3, unread_only: bool = True, sender: str = "", folder: str = "inbox"
+    ) -> tuple[int | None, list[MailSummary]]:
+        """(how many in that folder, the newest matching messages: who, subject, date only).
+
+        For the inbox the number is the unread count; for spam and sent it is the total. In the sent folder
+        "who" is the person you wrote to.
+        """
+        folder = folder if folder in FOLDERS else "inbox"
         count = max(1, min(count, MAX_SHOWN))
-        query = ["in:inbox"]
-        if unread_only:
+        query = [f"in:{folder}"]
+        if unread_only and folder == "inbox":
             query.append("is:unread")
         if sender.strip():
-            query.append("from:" + re.sub(r"[^\w@.\- ]", "", sender).strip())
+            key = "to" if folder == "sent" else "from"
+            query.append(f"{key}:" + re.sub(r"[^\w@.\- ]", "", sender).strip())
         with httpx.Client(timeout=10, transport=self._transport) as http:
-            unread = self._get(http, "labels/INBOX").get("messagesUnread")
-            listing = self._get(http, "messages", {"q": " ".join(query), "maxResults": count})
+            label = self._get(http, f"labels/{FOLDERS[folder]}")
+            unread = label.get("messagesUnread") if folder == "inbox" else label.get("messagesTotal")
+            listing = self._get(http, "messages", {"q": " ".join(query), "maxResults": count, "includeSpamTrash": folder == "spam"})
             mails = []
             for item in listing.get("messages", [])[:count]:
                 meta = self._get(
-                    http, f"messages/{item['id']}", {"format": "metadata", "metadataHeaders": ["From", "Subject", "Date"]}
+                    http, f"messages/{item['id']}", {"format": "metadata", "metadataHeaders": ["From", "To", "Subject", "Date"]}
                 )
                 headers = {h["name"].lower(): h["value"] for h in meta.get("payload", {}).get("headers", [])}
+                who = headers.get("to", "someone") if folder == "sent" else headers.get("from", "someone")
                 mails.append(
                     MailSummary(
-                        display_name(headers.get("from", "someone")),
+                        display_name(who.split(",")[0]),
                         _clean(headers.get("subject", ""), 90) or "no subject",
                         _clean(headers.get("date", ""), 40),
                     )
@@ -261,21 +272,38 @@ class GmailClient:
 class CheckEmailArgs(ToolArgs):
     count: int = Field(3, ge=1, le=MAX_SHOWN)
     unread_only: bool = True
-    sender: str = ""  # only mail from this person
+    sender: str = ""  # only mail from this person (to this person, for sent mail)
+    folder: Literal["inbox", "sent", "spam"] = "inbox"
 
 
 def make_check_email(gmail: GmailClient) -> Callable[[CheckEmailArgs], ToolResult]:
     def run(args: CheckEmailArgs) -> ToolResult:
+        folder = args.folder
+        unread_only = args.unread_only and folder == "inbox"
         try:
-            unread, mails = gmail.check(args.count, args.unread_only, args.sender)
+            total, mails = gmail.check(args.count, unread_only, args.sender, folder)
         except GmailError as exc:
             return ToolResult.failed(str(exc))
-        who = f" from {args.sender.strip()}" if args.sender.strip() else ""
-        head = f"You have {unread} unread email{'s' if unread != 1 else ''} in your inbox." if unread is not None and not who else ""
+        person = args.sender.strip()
+        if folder == "sent":
+            if not mails:
+                return ToolResult.done(f"You have not sent anything{' to ' + person if person else ''} that I can find.")
+            listed = "; ".join(f"{i}. to {m.sender}: {m.subject}" for i, m in enumerate(mails, 1))
+            return ToolResult.done(f"Your latest sent: {listed}.")
+        if folder == "spam":
+            if not total and not mails:
+                return ToolResult.done("Your spam folder is empty.")
+            head = f"You have {total} email{'s' if total != 1 else ''} in spam." if total is not None and not person else ""
+            if not mails:
+                return ToolResult.done(f"{head} Nothing from {person} in spam.".strip())
+            listed = "; ".join(f"{i}. {m.sender}: {m.subject}" for i, m in enumerate(mails, 1))
+            return ToolResult.done(f"{head} Newest in spam{' from ' + person if person else ''}: {listed}.".strip())
+        who = f" from {person}" if person else ""
+        head = f"You have {total} unread email{'s' if total != 1 else ''} in your inbox." if total is not None and not who else ""
         if not mails:
-            return ToolResult.done(head + (f" Nothing{' unread' if args.unread_only else ''}{who}." if who or not head else ""))
+            return ToolResult.done(head + (f" Nothing{' unread' if unread_only else ''}{who}." if who or not head else ""))
         listed = "; ".join(f"{i}. {m.sender}: {m.subject}" for i, m in enumerate(mails, 1))
-        label = "Newest unread" if args.unread_only else "Newest"
+        label = "Newest unread" if unread_only else "Newest"
         return ToolResult.done(f"{head} {label}{who}: {listed}.".strip())
 
     return run

@@ -162,3 +162,49 @@ def test_gmail_setup_command_switches_gmail_on(tmp_path):
 
     assert run_gmail_setup(settings, config, say=lines.append, authorize=refuse) == 1
     assert any("c.json" in line for line in lines)  # tells him where to save the client file
+
+
+def test_spam_and_sent_folders_are_queried_read_only(tmp_path):
+    secret, token = files(tmp_path)
+    seen = []
+    client = GmailClient(secret, token, transport=api(seen))
+    client.check(2, unread_only=True, folder="spam")
+    client.check(1, unread_only=True, sender="Alice", folder="sent")
+    queries = [r.url.params["q"] for r in seen if r.url.path.endswith("/messages")]
+    assert queries == ["in:spam", "in:sent to:Alice"]  # "unread only" only applies to the inbox
+    assert any(r.url.path.endswith("/labels/SPAM") for r in seen) and any(r.url.path.endswith("/labels/SENT") for r in seen)
+    assert next(r for r in seen if r.url.path.endswith("/messages")).url.params["includeSpamTrash"] == "true"
+    assert all(r.method == "GET" for r in seen)
+
+
+def test_sent_and_spam_messages_read_well(tmp_path):
+    secret, token = files(tmp_path)
+    run = make_check_email(GmailClient(secret, token, transport=api([])))
+    sent = run(CheckEmailArgs(count=1, folder="sent")).message
+    assert sent.startswith("Your latest sent: 1. to ") and "unread" not in sent
+    spam = run(CheckEmailArgs(count=1, folder="spam")).message
+    assert "in spam" in spam and "inbox" not in spam
+
+
+@pytest.mark.parametrize(
+    ("phrase", "args"),
+    [
+        ("what was my last email sent", {"folder": "sent", "count": 1}),
+        ("check my last email I sent", {"folder": "sent", "count": 1}),
+        ("show my sent emails", {"folder": "sent", "count": 3}),
+        ("check my last email sent to Alice", {"folder": "sent", "count": 1, "sender": "Alice"}),
+        ("check my spam folder", {"folder": "spam"}),
+        ("check spam", {"folder": "spam"}),
+        ("what's in my junk", {"folder": "spam"}),
+    ],
+)
+def test_router_sends_sent_and_spam_to_the_email_tool(phrase, args):
+    from jarvis.ai.router import CommandRouter
+    from jarvis.profile import load_profile
+    from tests.test_router import NOW, PROJECT_ROOT
+
+    router = CommandRouter(load_profile(PROJECT_ROOT / "config" / "profile.yaml"), ["check_email"], clock=lambda: NOW)
+    call = router(phrase)
+    assert call is not None and call.name == "check_email"
+    for key, value in args.items():
+        assert call.arguments[key] == value, (phrase, call)

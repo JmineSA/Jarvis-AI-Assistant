@@ -25,7 +25,7 @@ _RULES: dict[str, str] = {
     "web_search": r"\b(search|google|look up|lookup|find out|find|youtube|web|news|latest)\b",
     "maps": r"\b(maps?|directions?|routes?|navigate|near|nearby|nearest|closest|how far|how do i get|where)\b",
     "compose_email": r"\b(e-?mails?|mail|gmail|draft|compose|write (?:to|an?)|message)\b",
-    "check_email": r"\b(e-?mails?|mail|inbox|gmail|unread|messages?)\b",
+    "check_email": r"\b(e-?mails?|mail|inbox|gmail|unread|messages?|spam|junk|sent)\b",
     "play_media": r"\b(play|put on|listen|music|songs?|albums?|artists?|tracks?|playlist|shuffle|tunes?|by)\b",
     "open_drive_folder": r"\b(drive|main folder|movies?|games|documentar(?:y|ies)|videos?|series|folders?|software|study)\b",
     "play_video": r"\b(play|watch|movies?|films?|series|episodes?|season|videos?|documentar(?:y|ies)|vlc|concert)\b",

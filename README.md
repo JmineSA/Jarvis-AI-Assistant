@@ -303,7 +303,7 @@ Say **YouTube** ("play the video of Love Me on YouTube") and it goes to YouTube 
 
 ## Read-only Gmail (Phase 6.15)
 
-Say "check my email", "do I have any new emails", "read my last 5 emails" or "check my emails from Sam". JARVIS reads out the unread count and who wrote with the subject. It only ever reads sender, subject and date: it cannot send, delete or change anything, and it never reads the message text.
+Say "check my email", "do I have any new emails", "read my last 5 emails" or "check my emails from Sam". JARVIS reads out the unread count and who wrote with the subject. It only ever reads sender, subject and date: it cannot send, delete or change anything, and it never reads the message text. Also: "what was my last email sent", "show my sent emails", "check my spam folder" (the sent and spam folders are read-only too).
 
 One-time setup (about 5 minutes, free, no extra downloads):
 

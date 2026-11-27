@@ -211,7 +211,7 @@ def build_registry(
         registry.register(
             Tool(
                 name="open_folder",
-                description="Open a folder in Windows File Explorer.",
+                description="Open a folder as a window in Windows File Explorer. Only when asked to open it, not to list what is inside.",
                 parameters={
                     "type": "object",
                     "properties": {"name": _name_property(profile, "folders", "The folder")},
@@ -224,7 +224,7 @@ def build_registry(
         registry.register(
             Tool(
                 name="list_files",
-                description="List the files and folders inside one of the user's folders.",
+                description="Read out what is inside one of the user's folders ('what is in my X folder', 'show me the files in X'). Does not open a window.",
                 parameters={
                     "type": "object",
                     "properties": {
@@ -351,13 +351,14 @@ def build_registry(
         registry.register(
             Tool(
                 name="check_email",
-                description="Read-only: say how many unread emails there are and who the newest are from. Never sends or changes mail.",
+                description="Read-only: say how many unread emails there are and who the newest are from, or show the latest sent mail or what is in spam. Never sends or changes mail.",
                 parameters={
                     "type": "object",
                     "properties": {
                         "count": {"type": "integer", "description": "How many emails to list (1-10, default 3)"},
                         "unread_only": {"type": "boolean", "description": "Only unread mail (default true)"},
-                        "sender": _text_property("Only mail from this person"),
+                        "sender": _text_property("Only mail from this person (to this person for sent mail)"),
+                        "folder": {"type": "string", "enum": ["inbox", "sent", "spam"], "description": "inbox (default), sent for mail I sent, or spam"},
                     },
                 },
                 args_model=CheckEmailArgs,

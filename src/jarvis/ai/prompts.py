@@ -40,7 +40,7 @@ EXPLAIN_PROMPT = (
     "what you can see and what is unclear. You can read words only, not pictures or the shape of charts."
 )
 
-EMAIL_PROMPT = " Call check_email for new mail or the inbox. It reads only who wrote and the subject; you cannot open, reply to or send mail."
+EMAIL_PROMPT = " Call check_email for new mail, the inbox, the last sent email (folder sent) or the spam folder (folder spam). It reads only who wrote and the subject; you cannot open, reply to or send mail."
 
 
 def build_tool_system_prompt(owner_name: str | None = None, memory: bool = False, email: bool = False, screen: bool = False) -> str:
