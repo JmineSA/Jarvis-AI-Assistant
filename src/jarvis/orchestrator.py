@@ -17,7 +17,7 @@ from enum import Enum
 import numpy as np
 
 from jarvis.ai.ollama_client import OllamaError
-from jarvis.voice.audio_utils import clean_for_speech, peak_level
+from jarvis.voice.audio_utils import clean_for_speech, peak_level, trim_leading_silence
 from jarvis.voice.interfaces import (
     SAMPLE_RATE,
     Player,
@@ -41,6 +41,7 @@ class State(str, Enum):
 StateCallback = Callable[[State], None]
 MessageCallback = Callable[[str, str], None]  # (role, text); role: user | assistant | system
 
+MAX_FOLLOW_UPS = 3
 ANNOUNCEMENT_POLL_SECONDS = 0.25  # how often an idle JARVIS checks for reminders to speak
 
 LLM_DOWN_SPEECH = "I'm having trouble reaching my language model."
@@ -62,7 +63,19 @@ class VoiceAssistant:
         min_speech_seconds: float = 0.3,
         max_record_seconds: float = 30.0,
         silence_peak: float = 0.01,
+        annotate: Callable[..., None] | None = None,
+        ack: Callable[[], object] | None = None,
+        wake_reply: str = "",
+        follow_up: bool = False,
     ) -> None:
+        self._wake_reply = wake_reply
+        self._follow_up = follow_up
+        self._by_voice = False
+        self._last_reply = ""
+        self._ack = ack
+        self._annotate = annotate
+        self._stt_seconds = 0.0
+        self._tts_first = 0.0
         self._respond = respond
         self.recorder = recorder
         self.transcriber = transcriber
@@ -105,11 +118,28 @@ class VoiceAssistant:
                     continue
                 if not pressed:      # stop requested
                     break
-                self.run_turn()
+                self._conversation()
                 self._set_state(State.IDLE)
         finally:
             self.trigger.close()
             self._set_state(State.IDLE)
+
+    def _conversation(self) -> None:
+        """One start-to-finish exchange. After "Hey JARVIS" it says it is listening; if JARVIS then asks you
+        a question, it listens for your answer without the wake word (a few times at most), like a car assistant."""
+        by_voice = bool(getattr(self.trigger, "woke_by_voice", False))
+        if by_voice and self._wake_reply:
+            self._speak(self._wake_reply)
+            time.sleep(0.25)  # let the speaker go quiet so the microphone does not hear JARVIS itself
+        self.run_turn(by_voice=by_voice)
+        follow_ups = 0
+        while (
+            by_voice and self._follow_up and follow_ups < MAX_FOLLOW_UPS and not self._stop.is_set()
+            and self._last_reply.rstrip().endswith("?") and hasattr(self.trigger, "begin_follow_up")
+        ):
+            follow_ups += 1
+            self.trigger.begin_follow_up()
+            self.run_turn(by_voice=True, follow_up=True)
 
     def _flush_announcements(self) -> None:
         while True:
@@ -121,25 +151,38 @@ class VoiceAssistant:
             self._speak(text)
             self._set_state(State.IDLE)
 
-    def run_turn(self) -> None:
+    def run_turn(self, by_voice: bool = False, follow_up: bool = False) -> None:
         """Handle one spoken exchange. Never raises for ordinary failures."""
-        audio = self._listen()
+        self._by_voice = by_voice
+        self._last_reply = ""
+        audio = self._listen(follow_up)
         if audio is None:
             return
+        if self._ack is not None:
+            threading.Thread(target=self._play_ack, daemon=True).start()  # plays while speech recognition runs
         text = self._transcribe(audio)
         if not text:
             self._notify("system", "I didn't catch that.")
+            if by_voice:
+                self._speak("Sorry, I didn't catch that.")
             return
         self._notify("user", text)
         reply = self._think(text)
         if reply is None:
             return
         self._notify("assistant", reply)
+        self._last_reply = reply
+        self._tts_first = 0.0
         self._speak(reply)
+        if self._annotate is not None:
+            try:
+                self._annotate(via="voice", stt_s=self._stt_seconds, tts_first_s=self._tts_first, audio_s=audio.size / SAMPLE_RATE)
+            except Exception:
+                logger.exception("Could not annotate the turn log")
 
     # ------------------------------------------------------------------ stages
 
-    def _listen(self) -> np.ndarray | None:
+    def _listen(self, follow_up: bool = False) -> np.ndarray | None:
         self._set_state(State.LISTENING)
         try:
             self.recorder.start()
@@ -154,6 +197,12 @@ class VoiceAssistant:
             self._notify("system", f"Microphone error: {exc}")
             return None
 
+        if self._by_voice and audio.size >= self._min_samples and peak_level(audio) >= self._silence_peak:
+            audio = trim_leading_silence(audio, SAMPLE_RATE)  # drop the wait before you started talking
+        if self._by_voice and (audio.size < self._min_samples or peak_level(audio) < self._silence_peak):
+            if not follow_up:
+                self._notify("system", "Standing by. Say 'Hey JARVIS' when you need me.")
+            return None
         if audio.size < self._min_samples:
             self._notify("system", "That was too short. Hold the key while you speak.")
             return None
@@ -165,6 +214,13 @@ class VoiceAssistant:
             return None
         return audio
 
+    def _play_ack(self) -> None:
+        try:
+            if self._ack is not None:
+                self._ack()
+        except Exception:
+            logger.debug("Could not play the acknowledgement sound", exc_info=True)
+
     def _transcribe(self, audio: np.ndarray) -> str:
         self._set_state(State.PROCESSING)
         started = time.monotonic()
@@ -174,7 +230,8 @@ class VoiceAssistant:
             logger.exception("Transcription failed")
             self._notify("system", f"Speech recognition failed: {exc}")
             return ""
-        logger.info("STT %.1fs for %.1fs of audio", time.monotonic() - started, audio.size / SAMPLE_RATE)
+        self._stt_seconds = time.monotonic() - started
+        logger.info("STT %.1fs for %.1fs of audio", self._stt_seconds, audio.size / SAMPLE_RATE)
         return text.strip()
 
     def _think(self, text: str) -> str | None:
@@ -205,7 +262,8 @@ class VoiceAssistant:
                 if self.trigger.interrupt_requested():
                     break  # the user pressed talk: stop and listen
                 if first:
-                    logger.info("TTS first audio after %.1fs", time.monotonic() - started)
+                    self._tts_first = time.monotonic() - started
+                    logger.info("TTS first audio after %.1fs", self._tts_first)
                     first = False
                 if not self.player.play(clip, self.trigger.interrupt_requested):
                     break

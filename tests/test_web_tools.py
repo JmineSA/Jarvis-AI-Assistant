@@ -31,7 +31,8 @@ class FakeLauncher:
         raise AssertionError
 
 
-WHICH = lambda name: f"/bin/{name}"
+def WHICH(name):
+    return f"/bin/{name}"
 
 
 @pytest.fixture

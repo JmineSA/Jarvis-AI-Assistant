@@ -27,6 +27,15 @@ def real_db_unchanged():
 
 
 @pytest.fixture(autouse=True)
+def _no_real_turn_log(monkeypatch, tmp_path_factory):
+    """Tests never write to your real data/turns.jsonl."""
+    from jarvis.config import Settings
+
+    scratch = tmp_path_factory.mktemp("turns") / "turns.jsonl"
+    monkeypatch.setattr(Settings, "resolve_turns_path", lambda self: scratch)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_start_menu_lookup(monkeypatch):
     """Tests never read this computer's Start menu or start PowerShell."""
     from jarvis.tools import startmenu

@@ -96,5 +96,5 @@ def test_the_prompt_tells_the_model_about_the_new_abilities():
     from jarvis.ai.prompts import build_tool_system_prompt
 
     prompt = build_tool_system_prompt("Lesiba", memory=True)
-    assert "weather" in prompt and "play music" in prompt and "write an email" in prompt
+    assert "calling the tools" in prompt and "set alarms" in prompt  # actions come only from tools; limits are stated
     assert "You cannot play music" not in prompt

@@ -22,16 +22,6 @@ music:
 
 # Your main drive(s). JARVIS may open any folder on it by name ("open the main folder", "open the
 # movies folder") and play videos from it in VLC ("play the movie Dune"). It never changes or deletes anything.
-
-movies:
-  # PLACEHOLDER: change this to the real path of your music folder.
-  folder: 'G:\MOVIES & SERIES\MOVIES'
-  player: vlc               # the key of an app below
-
-
-# Your main drive(s). JARVIS may open any folder on it by name ("open the main folder", "open the
-# movies folder") and play videos from it in VLC ("play the movie Dune"). It never changes or deletes anything.
-
 drives:
   - 'G:\'
 

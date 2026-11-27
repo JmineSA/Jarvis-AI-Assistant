@@ -109,7 +109,7 @@ apps: {}
 def test_address_is_saved_and_the_weather_moves_to_the_suburb(tmp_path):
     path = tmp_path / "p.yaml"
     path.write_text(PROFILE, encoding="utf-8")
-    message, place = save_home_address(path, "6365 Nellmapius Drive, Pretoria", lambda a: Place("Nellmapius, Gauteng", -25.7, 28.4))
+    message, _place = save_home_address(path, "6365 Nellmapius Drive, Pretoria", lambda a: Place("Nellmapius, Gauteng", -25.7, 28.4))
     data = yaml.safe_load(path.read_text(encoding="utf-8"))["location"]
     assert data["address"] == "6365 Nellmapius Drive, Pretoria" and data["name"] == "Nellmapius"
     assert data["latitude"] == -25.7 and "Nellmapius, Gauteng" in message

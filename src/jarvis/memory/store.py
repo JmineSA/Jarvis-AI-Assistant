@@ -51,6 +51,7 @@ class Reminder:
     due_at: float
     created_at: float
     status: str
+    important: bool = False
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,7 @@ def _fact(row: sqlite3.Row) -> Fact:
 
 
 def _reminder(row: sqlite3.Row) -> Reminder:
-    return Reminder(row["id"], row["text"], row["due_at"], row["created_at"], row["status"])
+    return Reminder(row["id"], row["text"], row["due_at"], row["created_at"], row["status"], bool(row["important"]))
 
 
 def _message(row: sqlite3.Row) -> StoredMessage:
@@ -192,14 +193,14 @@ class MemoryStore:
 
     # ------------------------------------------------------------------ reminders
 
-    def add_reminder(self, text: str, due_at: float) -> Reminder:
+    def add_reminder(self, text: str, due_at: float, important: bool = False) -> Reminder:
         text = " ".join(text.split())[:MAX_FACT_LENGTH]
         if not text:
             raise ValueError("A reminder must say what to be reminded of.")
         with self._db.connect() as conn:
             cursor = conn.execute(
-                "INSERT INTO reminders (text, due_at, created_at) VALUES (?, ?, ?)",
-                (text, due_at, self._clock()),
+                "INSERT INTO reminders (text, due_at, created_at, important) VALUES (?, ?, ?, ?)",
+                (text, due_at, self._clock(), int(important)),
             )
             row = conn.execute("SELECT * FROM reminders WHERE id = ?", (cursor.lastrowid,)).fetchone()
         return _reminder(row)

@@ -253,3 +253,22 @@ def test_safe_to_use_from_many_threads_at_once(store):
     for t in threads:
         t.join()
     assert store.counts().messages == 200
+
+
+def test_reminders_keep_the_important_flag_and_old_databases_upgrade(tmp_path):
+    import sqlite3
+
+    from jarvis.memory.database import MIGRATIONS
+    from jarvis.memory.store import MemoryStore
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(MIGRATIONS[0])
+    conn.execute("PRAGMA user_version = 1")
+    conn.execute("INSERT INTO reminders (text, due_at, created_at) VALUES ('old one', 1.0, 0.0)")
+    conn.commit()
+    conn.close()
+    store = MemoryStore(path)
+    store.add_reminder("big", 2.0, important=True)
+    flags = {r.text: r.important for r in store.pending_reminders()}
+    assert flags == {"old one": False, "big": True}

@@ -123,6 +123,7 @@ def make_recall(store: MemoryStore, session_id: str | None) -> Callable[[RecallA
 class SetReminderArgs(ToolArgs):
     text: str = Field(min_length=1)
     when: str = Field(min_length=1)
+    important: bool = False  # important reminders are read first in the morning briefing
 
 
 def make_set_reminder(
@@ -140,10 +141,11 @@ def make_set_reminder(
         if due <= now:
             return ToolResult.failed("That time has already passed.")
         try:
-            store.add_reminder(text, due.timestamp())
+            store.add_reminder(text, due.timestamp(), args.important)
         except ValueError:
             return ToolResult.failed("Tell me what to remind you about.")
-        return ToolResult.done(f"Reminder set for {format_due(due, now)}: {text}.")
+        kind = "Important reminder" if args.important else "Reminder"
+        return ToolResult.done(f"{kind} set for {format_due(due, now)}: {text}.")
 
     return run
 
@@ -161,7 +163,7 @@ def make_list_reminders(
             return ToolResult.done("You have no reminders.")
         now = clock()
         shown = [
-            f"{r.text}, {format_due(datetime.fromtimestamp(r.due_at), now)}"
+            f"{'important: ' if r.important else ''}{r.text}, {format_due(datetime.fromtimestamp(r.due_at), now)}"
             for r in pending[:MAX_LISTED_REMINDERS]
         ]
         noun = "reminder" if len(pending) == 1 else "reminders"

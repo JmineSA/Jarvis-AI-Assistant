@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import ClassVar
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
@@ -176,6 +177,8 @@ class CoreWidget(QWidget):
         super().__init__(parent)
         self._state = "idle"
         self._angle = 0.0
+        self._breath = 0.0
+        self._ripple = 0.0
         self._detail_left = ""
         self._detail_right = ""
         self.setMinimumSize(420, 260)
@@ -208,8 +211,22 @@ class CoreWidget(QWidget):
         self._timer.stop()
         super().hideEvent(event)
 
+    # per state: (ring spin speed, breathing speed, breathing depth, ripple speed; 0 = no ripples)
+    MOTION: ClassVar[dict[str, tuple[float, float, float, float]]] = {
+        "idle": (0.5, 0.05, 0.012, 0.0),
+        "listening": (1.4, 0.16, 0.045, 0.012),
+        "thinking": (3.2, 0.30, 0.030, 0.0),
+        "speaking": (1.8, 0.24, 0.060, 0.016),
+    }
+
+    def _motion(self) -> tuple[float, float, float, float]:
+        return self.MOTION.get(self._state, self.MOTION["idle"])
+
     def _advance(self) -> None:
-        self._angle = (self._angle + (1.2 if self._state != "idle" else 0.5)) % 360
+        spin, breath, _depth, ripple = self._motion()
+        self._angle = (self._angle + spin * 1.2) % 3600
+        self._breath += breath
+        self._ripple = (self._ripple + ripple) % 1.0 if ripple else 0.0
         self.update()
 
     def paintEvent(self, event) -> None:
@@ -230,6 +247,16 @@ class CoreWidget(QWidget):
 
         centre = rect.center() + QPointF(0, -10)
         radius = min(rect.width() * 0.3, rect.height() * 0.38)
+        depth = self._motion()[2] if animations_enabled() else 0.0
+        radius *= 1.0 + depth * math.sin(self._breath)  # the orb breathes; faster and deeper while it talks
+
+        # ripples: a ring leaves the orb and fades while it is listening or speaking
+        if animations_enabled() and self._motion()[3]:
+            for offset in (0.0, 0.5):
+                t = (self._ripple + offset) % 1.0
+                painter.setPen(QPen(theme.qcolor(theme.STATE_COLORS[self._state], 0.45 * (1.0 - t)), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(centre, radius * (1.05 + 0.9 * t), radius * (1.05 + 0.9 * t))
 
         # orbit rings
         for width_f, height_f, tilt, spin, tint, alpha in (
@@ -246,7 +273,7 @@ class CoreWidget(QWidget):
 
         # glow
         glow = QRadialGradient(centre, radius * 1.7)
-        glow.setColorAt(0.0, theme.qcolor(theme.STATE_COLORS[self._state], 0.30))
+        glow.setColorAt(0.0, theme.qcolor(theme.STATE_COLORS[self._state], 0.30 + 0.25 * depth * 10 * (0.5 + 0.5 * math.sin(self._breath))))
         glow.setColorAt(1.0, theme.qcolor(theme.STATE_COLORS[self._state], 0.0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(glow))

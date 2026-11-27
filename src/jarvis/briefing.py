@@ -14,7 +14,7 @@ def _spoken_time(moment: datetime) -> str:
 
 
 def reminder_briefing(reminders: list[Reminder], now: datetime, limit: int = 2) -> str:
-    """Upcoming reminders for the rest of today, earliest first. Only `limit` are read out.
+    """Upcoming reminders for the rest of today: important ones first, then earliest. Only `limit` are read out.
 
     Reminders that are already late are announced separately by the reminder scheduler.
     """
@@ -22,11 +22,11 @@ def reminder_briefing(reminders: list[Reminder], now: datetime, limit: int = 2) 
         return ""
     end_of_day = datetime.combine(now.date() + timedelta(days=1), time.min).timestamp()
     today = sorted(
-        (r for r in reminders if now.timestamp() <= r.due_at < end_of_day), key=lambda r: (r.due_at, r.id)
+        (r for r in reminders if now.timestamp() <= r.due_at < end_of_day), key=lambda r: (not r.important, r.due_at, r.id)
     )
     if not today:
         return ""
-    parts = [f"{r.text} at {_spoken_time(datetime.fromtimestamp(r.due_at))}" for r in today[:limit]]
+    parts = [f"{'an important reminder: ' if r.important else ''}{r.text} at {_spoken_time(datetime.fromtimestamp(r.due_at))}" for r in today[:limit]]
     spoken = " Then ".join(f"You have {parts[0]}." if i == 0 else f"{p}." for i, p in enumerate(parts))
     if len(today) > limit:
         more = len(today) - limit

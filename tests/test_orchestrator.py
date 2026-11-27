@@ -215,7 +215,7 @@ def test_pressing_talk_while_speaking_cuts_speech_off():
             return not should_stop()
 
     player = InterruptingPlayer()
-    assistant, parts, *_ = build(player=player, trigger=trigger, synth=FakeSynth(sentences=3))
+    assistant, _parts, *_ = build(player=player, trigger=trigger, synth=FakeSynth(sentences=3))
     assistant.run_turn()
     assert player.played == 1
 
@@ -273,6 +273,6 @@ def test_announcement_queued_from_another_thread_is_spoken_on_a_later_poll():
 
 
 def test_idle_polling_does_not_start_a_turn():
-    assistant, parts, messages, _ = build(trigger=FakeTrigger(presses=1, timeouts=3))
+    assistant, parts, _messages, _ = build(trigger=FakeTrigger(presses=1, timeouts=3))
     assistant.run()
     assert parts["recorder"].started == 1  # only the one real press

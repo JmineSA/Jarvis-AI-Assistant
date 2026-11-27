@@ -1043,7 +1043,7 @@ class SettingsPage(QWidget):
         def run() -> None:
             try:
                 result: object = work()
-            except Exception as exc:  # noqa: BLE001 - shown to the user, never raised on the UI thread
+            except Exception as exc:
                 result = exc
             self._finished.emit(key, result)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -66,6 +67,19 @@ class SoundDeviceRecorder:
                 self._open(sd, rate)
         except Exception as exc:
             raise VoiceError(f"Cannot open the microphone: {exc}") from exc
+
+    def recent_peak(self, seconds: float) -> float:
+        """Loudest sample in roughly the last `seconds` of what is being recorded."""
+        needed = int(seconds * self._rate)
+        taken = 0
+        peak = 0.0
+        for frame in reversed(self._frames[-200:]):
+            if frame.size:
+                peak = max(peak, float(np.max(np.abs(frame))))
+            taken += frame.size
+            if taken >= needed:
+                break
+        return peak
 
     def stop(self) -> np.ndarray:
         stream, self._stream = self._stream, None
@@ -252,10 +266,8 @@ class EnterTrigger:
         return not stop.is_set()
 
     def wait_for_release(self, stop: threading.Event, timeout: float | None = None) -> None:
-        try:
+        with contextlib.suppress(EOFError):
             input("[Listening... press Enter when done] ")
-        except EOFError:
-            pass
 
     def interrupt_requested(self) -> bool:
         return False

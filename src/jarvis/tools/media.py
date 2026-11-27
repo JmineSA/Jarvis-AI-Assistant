@@ -282,7 +282,18 @@ def make_play_media(
     exists: Callable[[str], bool] = os.path.isfile,
     resolver: Callable[[str], str | None] = fetch_video_id,
     online: Callable[[], bool] = is_online,
+    video_fallback: Callable[[str], ToolResult] | None = None,
+    video_exact: Callable[[str], ToolResult] | None = None,
 ) -> Callable[[PlayMediaArgs], ToolResult]:
+    def local_then_video(query: str) -> tuple[ToolResult, str]:
+        """Your music folder first; if nothing is there, the same words are tried as a movie or series."""
+        result, why = play_local(query)
+        if why == "not_found" and video_fallback is not None and query:
+            video = video_fallback(query)
+            if video.status is ToolStatus.LAUNCHED or video.choices:
+                return video, "played" if video.status is ToolStatus.LAUNCHED else "ambiguous"
+        return result, why
+
     # ------------------------------------------------------------- local
     def play_local(query: str) -> tuple[ToolResult, str]:
         """Returns the result and why: played, not_found, ambiguous or setup."""
@@ -383,7 +394,7 @@ def make_play_media(
     def run(args: PlayMediaArgs) -> ToolResult:
         query = " ".join(args.name.split())
         if args.source == "local":
-            return play_local(query)[0]
+            return local_then_video(query)[0]
         if args.source in ("youtube_music", "youtube"):
             return play_web(query, args.source)
 
@@ -392,17 +403,22 @@ def make_play_media(
             return play_local(query)[0]
         preferred = profile.music.online
         if online():
+            if video_exact is not None:
+                # A film or series on your own drive with exactly this title beats a stream of the same words.
+                own = video_exact(query)
+                if own.status is ToolStatus.LAUNCHED or own.choices:
+                    return own
             if preferred != "local":
                 streamed = play_web(query, preferred)
                 if streamed.status is ToolStatus.LAUNCHED:
                     return streamed
-            result, why = play_local(query)
+            result, why = local_then_video(query)
             if why in ("played", "ambiguous"):
                 return result
             if preferred == "local":
                 return play_web(query, "youtube_music")
             return streamed
-        result, why = play_local(query)
+        result, why = local_then_video(query)
         if why in ("played", "ambiguous"):
             return result
         return ToolResult.failed(f"{result.message} I'm offline, so I can't try YouTube Music.")

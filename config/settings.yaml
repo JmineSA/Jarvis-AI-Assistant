@@ -15,12 +15,20 @@ brain:
 
 voice:
   push_to_talk_key: right_ctrl # hold to talk. Examples: f8, scroll_lock, ctrl+alt+j
-  input_device: 1  # microphone: your Focusrite input. Find numbers with `voice-check`
-  output_device: null  # speakers: index or part of their name
+  input_device: 2              # microphone: your Focusrite input. Find numbers with `voice-check`
+  output_device: null          # speakers: index or part of their name
   min_speech_seconds: 0.3      # shorter recordings are ignored as accidental taps
   max_record_seconds: 30
   silence_peak: 0.004          # quieter than this = "no sound heard" (low, so calm speech counts)
   models_dir: data/models
+  ack_sound: true              # a soft tick when you stop talking, so you know it heard you
+  wake_word: false             # say "Hey JARVIS" instead of holding the key. Turn on with `python -m jarvis wake-setup`
+  wake_threshold: 0.5          # lower (0.3) if it misses you, higher (0.7) if it wakes by itself
+  wake_silence_seconds: 1.2    # how long a quiet gap ends your sentence after a wake
+  wake_reply: "I'm listening."   # said after "Hey JARVIS" (empty = just a beep)
+  wake_listen_seconds: 10      # how long it waits for you to start talking, then goes back to sleep
+  wake_follow_up: true         # if JARVIS asks you a question, it listens for the answer without the wake word
+  wake_chime: true             # soft beep when it heard the wake word
   stt:
     model: small.en            # faster but less accurate: base.en
     language: en
@@ -33,8 +41,8 @@ voice:
     # Mishearings of "JARVIS" at the start of a sentence that are corrected automatically
     name_aliases: [Travis, Jervis, Jarvas, Javis, Jarvus, Jarvice, Gervais]
   tts:
-    voice: en_GB-northern_english_male-medium  # Piper voice name
-    length_scale: 0.9        # speaking speed: below 1 faster, above 1 slower
+    voice: en_US-ryan-high   # Piper voice name
+    length_scale: 0.8         # speaking speed: below 1 faster, above 1 slower
 
 tools:
   enabled: true                # false = JARVIS only talks

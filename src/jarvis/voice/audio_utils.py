@@ -17,7 +17,7 @@ def resample(samples: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
         usable = (samples.size // factor) * factor
         return samples[:usable].reshape(-1, factor).mean(axis=1).astype(np.float32)
     duration = samples.size / from_rate
-    out_len = max(1, int(round(duration * to_rate)))
+    out_len = max(1, round(duration * to_rate))
     old_t = np.linspace(0.0, duration, samples.size, endpoint=False)
     new_t = np.linspace(0.0, duration, out_len, endpoint=False)
     return np.interp(new_t, old_t, samples).astype(np.float32)
@@ -64,3 +64,16 @@ def clean_for_speech(text: str) -> str:
     text = text.replace("`", "").replace("*", "")
     text = _EMOJI.sub("", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def trim_leading_silence(samples: np.ndarray, rate: int, keep_seconds: float = 0.3) -> np.ndarray:
+    """Cut the quiet lead-in (the wait for you to start talking), keeping a little before the first word."""
+    frame = max(1, int(rate * 0.02))
+    if samples.size < frame * 2:
+        return samples
+    count = samples.size // frame
+    peaks = np.abs(samples[: count * frame]).reshape(count, frame).max(axis=1)
+    loud = np.flatnonzero(peaks >= max(0.012, 0.2 * float(peaks.max())))
+    if loud.size == 0:
+        return samples
+    return samples[max(0, int(loud[0] * frame - keep_seconds * rate)):]

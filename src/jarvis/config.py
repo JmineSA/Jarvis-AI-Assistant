@@ -55,6 +55,7 @@ class OllamaSettings(BaseModel):
 class BrainSettings(BaseModel):
     max_history_turns: int = Field(10, ge=1, le=100)
     fast_commands: bool = True   # answer obvious commands (open, play, weather...) without the model
+    tool_subset: bool = True     # send the model only the tools a sentence could need (shorter prompt = faster)
 
 
 class ApiSettings(BaseModel):
@@ -67,6 +68,8 @@ class LoggingSettings(BaseModel):
     directory: str = "logs"
     max_bytes: int = Field(1_048_576, ge=1024)
     backup_count: int = Field(3, ge=0)
+    record_turns: bool = True               # keep a local list of turns and timings (see `route-report`)
+    turns_file: str = "data/turns.jsonl"
 
 
 class SttSettings(BaseModel):
@@ -102,6 +105,14 @@ class TtsSettings(BaseModel):
 
 class VoiceSettings(BaseModel):
     push_to_talk_key: str = "right_ctrl"
+    wake_word: bool = False                 # say "Hey JARVIS" too (run `python -m jarvis wake-setup` first)
+    wake_threshold: float = Field(0.5, gt=0, le=1)   # lower = hears you more easily, but more false alarms
+    wake_silence_seconds: float = Field(1.2, gt=0.2, le=5)  # quiet for this long = you have finished
+    ack_sound: bool = True                  # a soft tick when you stop talking, so you know it heard you
+    wake_reply: str = "I'm listening."      # said after "Hey JARVIS" (empty = just a chime)
+    wake_listen_seconds: float = Field(10.0, ge=2.0, le=30.0)   # how long it waits for you to start talking
+    wake_follow_up: bool = True             # after a question from JARVIS ("What would you like to play?"), listen again
+    wake_chime: bool = True                 # a short beep when it hears the wake word
     input_device: int | str | None = None   # index or part of the device name
     output_device: int | str | None = None
     min_speech_seconds: float = Field(0.3, ge=0)
@@ -128,6 +139,22 @@ class MemorySettings(BaseModel):
     reminder_check_seconds: float = Field(5.0, gt=0)
 
 
+class GmailSettings(BaseModel):
+    """Read-only Gmail ("check my email"). Run `python -m jarvis gmail-setup` once."""
+
+    enabled: bool = False
+    client_secret_file: str = "data/gmail/client_secret.json"   # the JSON you download from Google
+    token_file: str = "data/gmail/token.json"                   # your saved sign-in (never leaves this PC)
+
+
+class ScreenSettings(BaseModel):
+    """"What's on my screen?": reads the window you are using, only when you ask. Nothing is stored."""
+
+    enabled: bool = True
+    max_chars: int = Field(5000, ge=500, le=12000)       # how much screen text the model gets (it has a small memory)
+    screenshot_dir: str = "data/screenshots"            # where "take a screenshot" saves pictures
+
+
 class UiSettings(BaseModel):
     greeting_name: str = Field("boss", max_length=40)   # what the dashboard calls you
     greet_on_start: bool = True  # say hello when the dashboard opens
@@ -146,6 +173,8 @@ class Settings(BaseModel):
     tools: ToolsSettings = Field(default_factory=ToolsSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     ui: UiSettings = Field(default_factory=UiSettings)
+    gmail: GmailSettings = Field(default_factory=GmailSettings)
+    screen: ScreenSettings = Field(default_factory=ScreenSettings)
 
     def resolve_database_path(self) -> Path:
         """Memory database as an absolute path (relative paths are project-relative)."""
@@ -161,6 +190,22 @@ class Settings(BaseModel):
         """Log directory as an absolute path (relative paths are project-relative)."""
         path = Path(self.logging.directory)
         return path if path.is_absolute() else PROJECT_ROOT / path
+
+    def resolve_turns_path(self) -> Path:
+        path = Path(self.logging.turns_file)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+    def resolve_screenshot_dir(self) -> Path:
+        path = Path(self.screen.screenshot_dir)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+    def resolve_gmail_paths(self) -> tuple[Path, Path]:
+        """(client file, saved sign-in) as absolute paths."""
+        paths = []
+        for text in (self.gmail.client_secret_file, self.gmail.token_file):
+            path = Path(text)
+            paths.append(path if path.is_absolute() else PROJECT_ROOT / path)
+        return paths[0], paths[1]
 
     def resolve_models_dir(self) -> Path:
         """Where downloaded voice and speech models are kept."""

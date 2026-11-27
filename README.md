@@ -276,6 +276,91 @@ drives:
 - **Any installed app, no locations needed:** "open Pod Player" looks the name up in your Start menu shortcuts and Microsoft Store apps if it is not in `profile.yaml`. Apps in the profile still come first. If two match equally, JARVIS asks which one. Only programs listed in the Start menu are ever started, and uninstallers are skipped. (This part needs Windows; please test it on your PC.)
 - **Several steps in one sentence:** "open the main folder and then search the music folder for Heartless and play it in VLC", "in the music folder search Love Me by Lil Wayne and play it". The folder names are hints; JARVIS runs the steps in order and stops if one fails. Sentences it cannot split cleanly go to the model as before.
 
+## Series without saying "movie" (Phase 6.11)
+
+- "play Citadel.S01 in main folder" now goes straight to the video search: names with S01 / S01E02 / season 2 / 1080p / .mkv are treated as series or movies, and "in the main folder" (or any folder name) is only a hint about where to look.
+- If a "play X" finds nothing in your music folder, JARVIS tries the same words on your drive's videos before giving up, so it no longer needs a second sentence like "it's in Movies & Series".
+
+## Saying movie titles (Phase 6.12)
+
+Safest phrases: **"play the movie The Run"**, **"watch The Run"**, **"play Citadel season 1"**. A bare **"play The Run"** now also checks your drive first: if a film or series on it has exactly that title (year and quality tags like `(2026)` or `1080p` are ignored), it plays that. Otherwise it behaves as before (YouTube Music when online, your music folder when offline). A partial title ("play Run") is never taken for a film.
+
+## Videos from your own drive (music videos, documentaries, concerts)
+
+Say the kind of thing it is and JARVIS searches your drive and plays it in VLC:
+
+- "play the video of Love Me by Lil Wayne", "play the music video Love Me", "play Love Me by Lil Wayne music video"
+- "play Lil Wayne videos locally" (several matches: it lists three and you say "the second one")
+- "play the documentary Our Planet", "play the live performance Kendrick Lamar", "watch ..."
+
+Say **YouTube** ("play the video of Love Me on YouTube") and it goes to YouTube instead. Words like "locally" or "from my drive" are accepted and ignored.
+
+## Phase 6.14: "Hey JARVIS", moving orb, fuzzy movie titles
+
+- **Wake word.** Say "Hey JARVIS" instead of holding Right Ctrl (the key still works). One-time setup: `python -m jarvis wake-setup` (downloads about 4 MB and turns it on). Test it with `python -m jarvis wake-check`. After it hears you it beeps, records until you stop talking, then answers. Everything runs on your PC; the microphone is only listened to for the wake phrase and nothing is saved. Settings (in `settings.yaml` under `voice:`): `wake_word`, `wake_threshold` (lower if it misses you, higher if it wakes by itself), `wake_silence_seconds`, `wake_chime`. Add these keys by hand if you keep your own settings file.
+- **Orb animation.** The core breathes, rings spin faster while thinking, and ripples leave the orb while listening or speaking; the waveform follows the same state.
+- **Misheard movie titles.** "Braking Bad" or "Heats" now find the right file; when nothing is close, it still says so.
+
+## Read-only Gmail (Phase 6.15)
+
+Say "check my email", "do I have any new emails", "read my last 5 emails" or "check my emails from Sam". JARVIS reads out the unread count and who wrote with the subject. It only ever reads sender, subject and date: it cannot send, delete or change anything, and it never reads the message text.
+
+One-time setup (about 5 minutes, free, no extra downloads):
+
+1. Go to console.cloud.google.com, create a project, then **APIs & Services > Library**, find **Gmail API** and click Enable.
+2. **APIs & Services > OAuth consent screen**: choose External, give it a name, add your own Gmail address under **Test users**.
+3. **Credentials > Create credentials > OAuth client ID > Desktop app**. Download the JSON.
+4. Save it as `data/gmail/client_secret.json` inside the jarvis folder (the folder is git-ignored).
+5. Run `python -m jarvis gmail-setup`. Your browser opens; allow **read-only** access. (Google may warn the app is unverified: that is normal for your own test app, choose Continue.) The command then switches `gmail.enabled` on.
+
+Your sign-in is stored in `data/gmail/token.json` on this PC. To disconnect, delete that file or remove JARVIS at myaccount.google.com/permissions. Add the `gmail:` block from the shipped `settings.yaml` to yours by hand if you want to change the file paths.
+
+## Important reminders (Phase 6.15)
+
+Say "set an important reminder to call the bank tomorrow at 9am" or add "it's important" at the end. At start-up JARVIS reads important reminders first. Existing reminders are untouched.
+
+## Code style
+
+`ruff check src tests` should print "All checks passed" (the rules are in `pyproject.toml`, and CI runs it).
+
+## More natural conversation (Phase 6.15)
+
+JARVIS now talks like a person: contractions, the answer first, a friendly tone that follows your mood, short natural follow-up questions now and then, and it works out "it" or "that" from the last few messages. A reply that hits the length cap now ends at its last complete sentence instead of stopping mid-word. It is still the one small model, so keep `brain.max_history_turns` at 4 or more if you want it to remember more of the chat (a little slower per reply).
+
+## Screen intelligence, level 1 (Phase 6.16)
+
+Say "what's on my screen?", "explain this error in my terminal", "explain this SQL query", "what does this Python function do?", "what is this application showing me?", "summarise the article I'm reading", or "take a screenshot". JARVIS finds the window you are working in (its own window is skipped), takes a picture of just that window, reads the words with Windows' built-in text recognition, and the local model explains them: what an error means, the likely cause and one fix to try, what code or SQL does, or the main point of an article. Say "the whole screen" to read everything.
+
+- Only when you ask. The picture is deleted at once; the text is never saved or logged; nothing leaves your PC. Text on screen is treated as material to explain, never as orders.
+- It reads **words only**. For a chart it can read the title and labels but cannot see the shape of the lines; for photos it says it can't read any text. A vision model for pictures is a later extra.
+- Use your voice (or place JARVIS beside the window): if the JARVIS dashboard covers the window you mean, the picture will include the dashboard.
+- Needs Pillow (`pip install -r requirements.txt`) and a Windows text-recognition language (English is normally installed). If Windows text recognition fails and Tesseract is installed, it is used instead.
+- Test it with `python -m jarvis screen-check` (it waits 5 seconds so you can switch to a window, then shows what it read). Turn it off with `screen.enabled: false`. Add the `screen:` block from the shipped `settings.yaml` to yours by hand if you want to change `max_chars` or the screenshot folder.
+- Follow-up questions about the same screen need a fresh "explain this ...", because the screen text is not kept.
+
+## Faster and more accurate: measure first (Phase 6.17)
+
+Three tools show where time and mistakes really are, so the next fixes aim at the right thing.
+
+- **`python -m jarvis route-report`** reads `data/turns.jsonl`, a small local record of each turn (what you said, fast path or model, which tools ran, how long each stage took). It prints how many turns were instant, the average time for the instant and the model paths, speech recognition time, and two lists: commands the model had to work out (send me these and I add instant rules for them) and plain conversation. Stays on your PC; turn it off with `logging.record_turns: false`.
+- **`python -m jarvis tool-eval`** runs 40 everyday sentences through the model alone and scores whether it picks the right tool, with the time per sentence and a list of its mistakes. To try another model: `ollama pull NAME`, then `python -m jarvis tool-eval NAME`. Keep whichever scores better and is fast enough; it replaces the current model, so you still run only one.
+- **Soft tick** the moment you stop talking, so you know it heard you while it thinks (`voice.ack_sound: false` to turn it off).
+
+Not built yet, on purpose: speaking while the model is still writing, and sending only the relevant tools per request. Both could slow things down on your GPU unless measured first, so they wait for your `route-report` and `tool-eval` numbers.
+
+## Phase 6.18: prompt cache check
+
+`python -m jarvis speed-check` now ends with a **prompt-cache test**. A reply is quick when Ollama reuses its stored copy of the long instructions and reads only your new words. The test sends three tiny requests and tells you whether that is happening on your PC. Past turns are also now re-sent exactly as before (including the clock note), so the start of each request stays identical.
+
+## Phase 6.20: "Hey JARVIS" like a car assistant
+
+Say "Hey JARVIS" and it answers **"I'm listening."** out loud, then waits up to 10 seconds for you to speak. Say your request ("please play Kanye West Power") and it answers. If you say nothing for 10 seconds it quietly goes back to sleep; say "Hey JARVIS" again to wake it. Holding Right Ctrl still works as before.
+
+- If JARVIS asks you something ("Sure. What would you like to play?"), it listens for your answer straight away without the wake word, up to three questions in a row.
+- Saying just "play" makes it ask what to play; your next words are the title.
+- Settings under `voice:` in `settings.yaml` (add by hand if you keep your own file): `wake_reply` (empty = a beep instead), `wake_listen_seconds`, `wake_follow_up`.
+- Also in this version: the instructions sent to the model are shorter, and only the tools a sentence could need are sent (`brain.tool_subset: false` turns that off). This makes model replies faster. Run `python -m jarvis tool-eval` to check it still picks the right tool.
+
 ## Test
 
 ```powershell

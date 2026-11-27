@@ -4,19 +4,25 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import sys
 from collections.abc import Callable
 from datetime import datetime
 
 from jarvis.ai.brain import Brain, ChatClient
 from jarvis.ai.prompts import SYSTEM_PROMPT, build_tool_system_prompt
 from jarvis.ai.router import CommandRouter
+from jarvis.ai.toolselect import ToolSelector
 from jarvis.config import Settings
 from jarvis.memory.store import MemoryStore
 from jarvis.profile import Profile, load_profile
 from jarvis.tools.builtin import build_registry
-from jarvis.tools.executor import ToolExecutor
 from jarvis.tools.drives import prewarm as prewarm_drives
+from jarvis.tools.executor import ToolExecutor
+from jarvis.tools.gmail import GmailClient
 from jarvis.tools.media import prewarm as prewarm_music
+from jarvis.tools.screen import ScreenBackend, WindowsScreen
+from jarvis.tools.startmenu import StartMenu
+from jarvis.turnlog import TurnLog
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +81,10 @@ def make_clock_note(clock: Callable[[], datetime] = datetime.now) -> Callable[[]
     return note
 
 
+def _turn_log(settings: Settings) -> TurnLog | None:
+    return TurnLog(settings.resolve_turns_path()) if settings.logging.record_turns else None
+
+
 def build_brain(
     settings: Settings,
     client: ChatClient,
@@ -83,11 +93,22 @@ def build_brain(
 ) -> Brain:
     """The brain, with tools and memory attached when they are enabled."""
     if not settings.tools.enabled:
-        return Brain(client, SYSTEM_PROMPT, settings.brain.max_history_turns)
+        return Brain(client, SYSTEM_PROMPT, settings.brain.max_history_turns, turn_log=_turn_log(settings))
 
     profile = profile if profile is not None else load_user_profile(settings)
     session_id = MemoryStore.new_session_id()
-    registry = build_registry(profile, store=store, session_id=session_id)
+    startmenu = StartMenu()
+    gmail = None
+    if settings.gmail.enabled:
+        secret_file, token_file = settings.resolve_gmail_paths()
+        gmail = GmailClient(secret_file, token_file)
+        if not gmail.signed_in:
+            logger.warning("gmail.enabled is on but you have not signed in. Run: python -m jarvis gmail-setup")
+    screen: ScreenBackend | None = WindowsScreen() if settings.screen.enabled and sys.platform == "win32" else None
+    registry = build_registry(
+        profile, store=store, session_id=session_id, startmenu=startmenu, gmail=gmail,
+        screen=screen, screen_settings=settings.screen, screenshot_dir=settings.resolve_screenshot_dir(),
+    )
     executor = ToolExecutor(
         registry,
         always_confirm=settings.tools.always_confirm,
@@ -99,6 +120,7 @@ def build_brain(
     logger.info("Tools ready: %s", ", ".join(registry.names()))
     prewarm_music(profile)
     prewarm_drives(profile)
+    startmenu.prewarm()  # read the installed-programs list in the background
     router = (
         CommandRouter(profile, registry.names(), aliases=settings.voice.stt.name_aliases)
         if settings.brain.fast_commands
@@ -107,7 +129,7 @@ def build_brain(
 
     return Brain(
         client,
-        build_tool_system_prompt(profile.owner_name, memory=store is not None),
+        build_tool_system_prompt(profile.owner_name, memory=store is not None, email=gmail is not None, screen=screen is not None),
         settings.brain.max_history_turns,
         executor=executor,
         context=make_context(store, profile.owner_name, settings.memory.max_facts_in_prompt)
@@ -117,4 +139,6 @@ def build_brain(
         session_id=session_id,
         router=router,
         turn_note=make_clock_note(),
+        turn_log=_turn_log(settings),
+        tool_selector=ToolSelector(profile) if settings.brain.tool_subset else None,
     )

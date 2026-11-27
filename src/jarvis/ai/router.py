@@ -45,10 +45,15 @@ _PLAY = re.compile(
 )
 _VIDEO = re.compile(
     r"^(?:(?:open|go to)\s+(?:the\s+|my\s+)?(?P<folder>.+?)\s+(?:folder\s+)?(?:and\s+then|and|then)\s+)?"
-    r"(?:play|watch|put on)\s+(?:the\s+|a\s+|some\s+)?(?:(?P<kind>movie|film|series|show|episode|video|documentary)\s*)?(?P<name>.*?)"
+    r"(?:play|watch|put on)\s+(?:the\s+|a\s+|some\s+)?(?:(?P<kind>(?:music\s+)?videos?|movies?|films?|series|shows?|episodes?|documentar(?:y|ies)|live\s+performances?|concerts?)\s*)?(?P<name>.*?)"
     r"(?:\s+(?:in|on|with|using)\s+(?:vlc|(?:the\s+)?media player))?$",
     re.IGNORECASE,
 )
+# Words that mark a title as a series/movie file rather than a song: S01E02, season 2, 1080p, .mkv
+_VIDEOISH = re.compile(r"\bs\d{1,2}(?:e\d{1,2})?\b|\bseason\s*\d|\bepisode\b|\b(?:480|720|1080|2160)p\b|\.(?:mkv|mp4|avi)\b", re.IGNORECASE)
+# "... in the main folder" / "... in my movies folder" at the end of a play request
+_SCOPE_TAIL = re.compile(r"\s+(?:in|inside|from)\s+(?:the\s+|my\s+)?(?P<scope>[\w &'-]+?)\s+(?:folder|drive)$", re.IGNORECASE)
+_WHOLE_DRIVE = {"main", "root", "g", "everything", "all"}
 _STEP_BREAK = re.compile(r"\s*,?\s+(?:and\s+then|and\s+after\s+that|after\s+that|then|and)\s+|\s*,\s+", re.IGNORECASE)
 _TAIL_VLC = r"(?:\s+(?:in|on|with|using)\s+(?:vlc|(?:the\s+)?media player))?"
 _PLAY_IT = r"(?:\s+(?:and\s+)?(?:then\s+)?play(?:\s+it)?)?"
@@ -133,6 +138,37 @@ _MEDIA_WORDS = {
 }
 _MEDIA = [(re.compile(rf"^(?:{pattern})$", re.IGNORECASE), action) for pattern, action in _MEDIA_WORDS.items()]
 _REMEMBER = re.compile(r"^remember(?:\s+that)?\s+(?!to\b)(?P<text>.+)$", re.IGNORECASE)
+_IMPORTANT_LEAD = re.compile(
+    r"^(?:(?:set|add|make|create)\s+(?:me\s+)?(?:an?\s+)?)?important\s+reminder\s+(?:for\s+me\s+)?(?P<rest>(?:to|about|that|in|at|on|tomorrow)\b.+)$",
+    re.IGNORECASE,
+)
+_IMPORTANT_TAIL = re.compile(r"[,.]?\s*(?:(?:and\s+)?(?:it(?:'s|\s+is)|that(?:'s|\s+is)|this\s+is)\s+(?:very\s+)?important|mark\s+it\s+(?:as\s+)?important)\s*$", re.IGNORECASE)
+_SCREENSHOT = re.compile(
+    r"^(?:please\s+)?(?:take|grab|capture|save|make)\s+(?:me\s+)?(?:a\s+)?screen\s?shot(?:\s+of\s+(?:my\s+|the\s+)?(?:window|screen|whole\s+screen|entire\s+screen))?\s*[.!]?$",
+    re.IGNORECASE,
+)
+_LOOK = re.compile(
+    r"^(?:please\s+|jarvis[, ]+)?(?:"
+    r"what(?:'s|\s+is|\s+are)\s+(?:on|in)\s+(?:my\s+|the\s+)?(?:(?:whole|entire|full)\s+)?(?:screen|window)"
+    r"|what\s+(?:do|can)\s+you\s+see(?:\s+on\s+(?:my\s+|the\s+)?screen)?"
+    r"|(?:look\s+at|read|check|scan)\s+(?:my\s+|the\s+)?(?:(?:whole|entire|full)\s+)?(?:screen|window)"
+    r"|(?:explain|summari[sz]e|describe|analy[sz]e|review|debug|read)\s+(?:this|that|these|those|the\s+(?:error|query|code|function|chart|graph|article|page|screen|window|terminal|output|message|text|table|script|log))\b"
+    r"|what\s+does\s+(?:this|that)\s+(?:\w+\s+)?(?:function|code|query|script|line|error|command|class|method|sql|program)\b"
+    r"|what(?:'s|\s+is)\s+(?:this|that)\s+(?:error|chart|graph|page|code|query|application|app|window|program|table)\b"
+    r"|why\s+am\s+i\s+(?:getting|seeing)\s+(?:this|that|an?|the)\s+(?:error|warning|exception|message)"
+    r"|what\s+(?:is|does)\s+this\s+(?:application|app|page|window|program)\s+(?:showing|saying|telling|display)"
+    r"|summari[sz]e\s+(?:the\s+)?(?:article|page|post|email|document|thread)\s+(?:i(?:'m|\s+am)\s+reading|on\s+(?:my\s+)?screen)"
+    r")",
+    re.IGNORECASE,
+)
+_EMAIL = re.compile(
+    r"^(?:(?:please\s+)?(?:check|read|show|open|see)\s+(?:me\s+)?(?:my\s+)?(?:(?:last|latest|recent|new|unread)\s+)?(?:(?P<n>\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?"
+    r"(?:(?:new|unread|latest|last|recent)\s+)?(?:e-?mails?|inbox|mail|gmail)"
+    r"|(?:do\s+i\s+have|are\s+there|have\s+i\s+got|any)\s+(?:any\s+)?(?:new\s+|unread\s+)?(?:e-?mails?|mail|messages?)"
+    r"|what(?:'s|\s+is)\s+in\s+my\s+(?:inbox|mail|gmail))"
+    r"(?:\s+(?:from|by)\s+(?P<sender>[\w .'-]{2,40}?))?\s*[?.!]?$",
+    re.IGNORECASE,
+)
 _REMIND = re.compile(r"^remind\s+me\s+(?P<rest>.+)$", re.IGNORECASE)
 _LIST_REMINDERS = re.compile(
     r"^(?:what(?:'s|\s+are)\s+my\s+reminders|list\s+(?:my\s+)?reminders|do\s+i\s+have\s+any\s+reminders|show\s+(?:my\s+)?reminders)$",
@@ -209,7 +245,7 @@ class CommandRouter:
     def _single(self, command: str) -> ToolCall | None:
         for handler in (
             self._media, self._scoped_music, self._video, self._play, self._open, self._weather, self._maps, self._time, self._status,
-            self._search, self._remember, self._remind, self._list_reminders,
+            self._search, self._remember, self._remind, self._list_reminders, self._email, self._screen,
         ):
             call = handler(command)
             if call is not None and call.name in self._tools:
@@ -235,6 +271,13 @@ class CommandRouter:
         return None
 
     def _video(self, command: str) -> ToolCall | None:
+        if re.search(r"\byoutube\b", command, re.IGNORECASE):
+            return None  # you asked for the streaming site: that is the music/YouTube route
+        command = re.sub(r"\s+(?:locally|from\s+(?:my\s+)?(?:drive|computer|pc|laptop)|(?:on|from)\s+(?:the\s+)?(?:g\s+)?drive)$", "", command, flags=re.IGNORECASE)
+        # "play Love Me by Lil Wayne music video" -> the kind word at the end moves to the front
+        trailing = re.match(r"^(?P<verb>play|watch|put on)\s+(?P<name>.+?)\s+(?P<kind>(?:music\s+)?videos?)$", command, re.IGNORECASE)
+        if trailing:
+            command = f"{trailing.group('verb')} the {trailing.group('kind')} {trailing.group('name')}"
         match = _VIDEO.match(command)
         if not match or "play_video" not in self._tools:
             return None
@@ -242,11 +285,19 @@ class CommandRouter:
         kind = match.group("kind")
         name = match.group("name").strip()
         verb = command.split()[0].lower()
-        if folder:
-            if re.search(r"music|youtube|song|album", folder, re.IGNORECASE):
-                return None  # "open my music folder and play ..." stays music
-        elif not kind and verb != "watch":
-            return None  # a bare "play X" is music
+        tail = _SCOPE_TAIL.search(name)
+        if tail and not folder:
+            scope = tail.group("scope").strip()
+            if re.search(r"music|song|album", scope, re.IGNORECASE):
+                return None
+            name = name[: tail.start()].strip()
+            folder = "" if scope.lower() in _WHOLE_DRIVE else scope
+            if not kind and verb != "watch" and not _VIDEOISH.search(name) and not folder:
+                return None  # "play X in the main folder" with no sign it is a video: let the music search try
+        if not folder and not kind and verb != "watch" and not _VIDEOISH.search(name):
+            return None
+        if folder and re.search(r"music|youtube|song|album", folder, re.IGNORECASE):
+            return None  # "open my music folder and play ..." stays music
         if name.lower() in {"it", "that", "this", "something", "anything", "one"}:
             name = ""
         arguments = {"name": name}
@@ -298,6 +349,11 @@ class CommandRouter:
             if locally:
                 source = "local"
                 rest = rest[: locally.start()].strip()
+        tail = _SCOPE_TAIL.search(rest)
+        if tail:  # "play Love Me in the music folder" / "... in the main folder": only a hint
+            rest = rest[: tail.start()].strip()
+            if re.search(r"music|song|album", tail.group("scope"), re.IGNORECASE):
+                source = source or "local"
         query = _QUERY_LEAD.sub("", rest).strip()
         if query.lower() in _BARE_MUSIC or rest.lower() in _BARE_MUSIC:
             query = ""
@@ -416,10 +472,58 @@ class CommandRouter:
         match = _REMEMBER.match(command)
         return ToolCall("remember", {"text": match.group("text").strip()}) if match else None
 
+    def _screen(self, command: str) -> ToolCall | None:
+        """"What's on my screen?", "explain this error", "take a screenshot": only ever on request."""
+        text = command.strip()
+        whole = bool(re.search(r"\b(?:whole|entire|full|all)\b.*\bscreens?\b", text, re.IGNORECASE))
+        shot = _SCREENSHOT.match(text)
+        if shot and "take_screenshot" in self._tools:
+            window = bool(re.search(r"\bwindow\b", text, re.IGNORECASE))
+            return ToolCall("take_screenshot", {"whole_screen": not window})
+        if "look_at_screen" in self._tools and _LOOK.match(text):
+            args: dict[str, object] = {"question": text}
+            if whole:
+                args["whole_screen"] = True
+            return ToolCall("look_at_screen", args)
+        return None
+
+    def _email(self, command: str) -> ToolCall | None:
+        """"Check my email", "any new emails from Sam", "read my last 5 emails" (read-only)."""
+        if "check_email" not in self._tools:
+            return None
+        match = _EMAIL.match(command)
+        if not match:
+            return None
+        args: dict[str, object] = {}
+        words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+        number = (match.group("n") or "").lower()
+        if number:
+            args["count"] = int(number) if number.isdigit() else words[number]
+        if match.group("sender"):
+            args["sender"] = match.group("sender").strip()
+        if re.search(r"\b(?:last|latest|recent)\b", command, re.IGNORECASE):
+            args["unread_only"] = False
+        return ToolCall("check_email", args)
+
     def _list_reminders(self, command: str) -> ToolCall | None:
         return ToolCall("list_reminders", {}) if _LIST_REMINDERS.match(command) else None
 
     def _remind(self, command: str) -> ToolCall | None:
+        important = False
+        # "set an important reminder to ...", "important: remind me ...", "... , it's important"
+        lead = _IMPORTANT_LEAD.match(command)
+        if lead:
+            command, important = "remind me " + lead.group("rest"), True
+        elif _IMPORTANT_TAIL.search(command):
+            command, important = _IMPORTANT_TAIL.sub("", command), True
+        elif re.match(r"^important\b[:,]?\s+remind\s+me\b", command, re.IGNORECASE):
+            command, important = re.sub(r"^important\b[:,]?\s+", "", command, flags=re.IGNORECASE), True
+        call = self._remind_plain(command)
+        if call is not None and important:
+            call.arguments["important"] = True
+        return call
+
+    def _remind_plain(self, command: str) -> ToolCall | None:
         match = _REMIND.match(command)
         if not match:
             return None

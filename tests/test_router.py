@@ -5,7 +5,7 @@ import pytest
 from jarvis.ai.ollama_client import ToolCall
 from jarvis.ai.router import CommandRouter, clean
 from jarvis.config import PROJECT_ROOT
-from jarvis.profile import load_profile
+from jarvis.profile import Profile, load_profile
 
 NOW = datetime(2026, 11, 25, 10, 0)
 ALL_TOOLS = [
@@ -275,3 +275,72 @@ def test_steps_that_do_not_both_make_sense_go_to_the_model():
     router = _drive_router()
     assert router("open the main folder and tell me a joke") is None
     assert router("how do I make tea and then coffee") is None
+
+
+# ------------------------------------------------------------------ "play Citadel.S01 in main folder"
+@pytest.mark.parametrize(
+    "text,name,args",
+    [
+        ("play Citadel.S01 in main folder", "play_video", {"name": "Citadel.S01"}),
+        ("play Citadel S01E02", "play_video", {"name": "Citadel S01E02"}),
+        ("play Citadel season 1 in the movies and series folder", "play_video", {"name": "Citadel season 1", "folder": "movies and series"}),
+        ("play Love Me in the music folder", "play_media", {"name": "Love Me", "source": "local"}),
+        ("play Love Me in the main folder", "play_media", {"name": "Love Me", "source": "auto"}),
+    ],
+)
+def test_series_and_scoped_play(text, name, args):
+    call = _drive_router()(text)
+    assert call.name == name and call.arguments == args
+
+
+@pytest.mark.parametrize(
+    "text,args",
+    [
+        ("play the video of Love Me by Lil Wayne", {"name": "of Love Me by Lil Wayne"}),
+        ("play the music video of Love Me by Lil Wayne", {"name": "of Love Me by Lil Wayne"}),
+        ("play the music video Love Me", {"name": "Love Me"}),
+        ("play Love Me by Lil Wayne music video", {"name": "Love Me by Lil Wayne"}),
+        ("play Lil Wayne videos locally", {"name": "Lil Wayne"}),
+        ("play the documentary Our Planet", {"name": "Our Planet"}),
+        ("play the live performance Kendrick Lamar", {"name": "Kendrick Lamar"}),
+    ],
+)
+def test_local_videos_by_saying_video(text, args):
+    call = _drive_router()(text)
+    assert call.name == "play_video" and call.arguments == args
+
+
+def test_saying_youtube_keeps_it_on_youtube():
+    call = _drive_router()("play the video of Love Me by Lil Wayne on YouTube")
+    assert call.name == "play_media"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "set an important reminder to call the bank tomorrow at 9am",
+        "remind me to call the bank tomorrow at 9am, it's important",
+        "important remind me to call the bank tomorrow at 9am",
+    ],
+)
+def test_important_reminders_are_flagged(route, text):
+    assert route(text) == ToolCall("set_reminder", {"text": "call the bank", "when": "tomorrow at 9am", "important": True})
+
+
+@pytest.mark.parametrize(
+    ("text", "args"),
+    [
+        ("check my email", {}),
+        ("do I have any new emails", {}),
+        ("read my last 5 emails", {"count": 5, "unread_only": False}),
+        ("check my emails from Sam", {"sender": "Sam"}),
+        ("what's in my inbox?", {}),
+    ],
+)
+def test_email_commands_are_read_only_checks(text, args):
+    router = CommandRouter(Profile(), {"check_email"})
+    assert router(text) == ToolCall("check_email", args)
+
+
+def test_email_phrases_do_nothing_without_the_tool():
+    assert CommandRouter(Profile(), {"open_app"})("check my email") is None

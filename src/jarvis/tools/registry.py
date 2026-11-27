@@ -23,10 +23,13 @@ class ToolResult:
     message: str  # plain sentence, safe to speak aloud
     # Options the user can pick from next turn: (label, arguments for the same tool).
     choices: tuple[tuple[str, dict[str, Any]], ...] = ()
+    # Material the model should explain (for example text read from the screen). When set, the brain asks the
+    # model about it and speaks the answer; `message` is only the fallback if the model is unavailable.
+    ask: str = ""
 
     @classmethod
-    def done(cls, message: str) -> ToolResult:
-        return cls(ToolStatus.DONE, message)
+    def done(cls, message: str, ask: str = "") -> ToolResult:
+        return cls(ToolStatus.DONE, message, ask=ask)
 
     @classmethod
     def launched(cls, message: str) -> ToolResult:
@@ -57,6 +60,7 @@ class Tool:
     risk: Literal["safe", "confirm"] = "safe"
     # Plain-words description of what this call will do, shown when asking you to confirm.
     describe: Callable[[Any], str] | None = None
+    timeout: float | None = None        # seconds; None = the executor's default
 
 
 class ToolRegistry:

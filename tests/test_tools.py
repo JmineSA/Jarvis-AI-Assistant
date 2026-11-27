@@ -285,7 +285,9 @@ def test_system_status_message(monkeypatch):
 
 
 def test_current_time_message():
-    clock = lambda: datetime(2026, 11, 4, 9, 5)
+    def clock():
+        return datetime(2026, 11, 4, 9, 5)
+
     assert make_current_time(clock)(NoArgs()).message == "It's 09:05 on Wednesday, 4 November 2026."
 
 

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+from jarvis.config import ScreenSettings
 from jarvis.memory.store import MemoryStore
 from jarvis.profile import Kind, Profile
 from jarvis.tools.apps import (
@@ -25,6 +26,7 @@ from jarvis.tools.drives import (
     make_play_video,
 )
 from jarvis.tools.files import ListFilesArgs, make_list_files
+from jarvis.tools.gmail import CheckEmailArgs, GmailClient, make_check_email
 from jarvis.tools.launcher import Launcher, SystemLauncher
 from jarvis.tools.maps import MapsArgs, make_maps
 from jarvis.tools.media import PlayMediaArgs, make_play_media
@@ -44,6 +46,7 @@ from jarvis.tools.memory_tools import (
     make_set_reminder,
 )
 from jarvis.tools.registry import Tool, ToolRegistry
+from jarvis.tools.screen import SCREEN_TIMEOUT, ScreenArgs, ScreenBackend, ScreenshotArgs, make_look_at_screen, make_take_screenshot
 from jarvis.tools.startmenu import StartMenu
 from jarvis.tools.system import NoArgs, make_current_time, make_system_status
 from jarvis.tools.weather import WeatherArgs, make_weather
@@ -165,6 +168,10 @@ def build_registry(
     session_id: str | None = None,
     media_keys: KeySender | None = None,
     startmenu: StartMenu | None = None,
+    gmail: GmailClient | None = None,
+    screen: ScreenBackend | None = None,
+    screen_settings: ScreenSettings | None = None,
+    screenshot_dir: Path | None = None,
 ) -> ToolRegistry:
     launcher = launcher or SystemLauncher()
     registry = ToolRegistry()
@@ -305,6 +312,60 @@ def build_registry(
             run=make_compose_email(profile, launcher),
         )
     )
+    if screen is not None:
+        limit = (screen_settings or ScreenSettings()).max_chars
+        registry.register(
+            Tool(
+                name="look_at_screen",
+                description=(
+                    "Read the words in the window the user is working in and explain them. Use for 'what's on my screen', "
+                    "'explain this error / query / function / chart / article', 'summarise what I'm reading'. "
+                    "Pass the user's own words as question."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "question": _text_property("What the user wants to know about the screen, in their words"),
+                        "whole_screen": {"type": "boolean", "description": "true only if they say the whole or entire screen"},
+                    },
+                },
+                args_model=ScreenArgs,
+                run=make_look_at_screen(screen, limit),
+                timeout=SCREEN_TIMEOUT,
+            )
+        )
+        registry.register(
+            Tool(
+                name="take_screenshot",
+                description="Save a picture of the screen to the screenshots folder.",
+                parameters={
+                    "type": "object",
+                    "properties": {"whole_screen": {"type": "boolean", "description": "false = only the window in use"}},
+                },
+                args_model=ScreenshotArgs,
+                run=make_take_screenshot(screen, screenshot_dir or Path("data/screenshots")),
+                timeout=SCREEN_TIMEOUT,
+            )
+        )
+    if gmail is not None:
+        registry.register(
+            Tool(
+                name="check_email",
+                description="Read-only: say how many unread emails there are and who the newest are from. Never sends or changes mail.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "count": {"type": "integer", "description": "How many emails to list (1-10, default 3)"},
+                        "unread_only": {"type": "boolean", "description": "Only unread mail (default true)"},
+                        "sender": _text_property("Only mail from this person"),
+                    },
+                },
+                args_model=CheckEmailArgs,
+                run=make_check_email(gmail),
+            )
+        )
+    where = State()  # the folder you last opened, shared by the drive tools
+    play_video = make_play_video(profile, launcher, where) if profile.drives else None
     registry.register(
         Tool(
             name="play_media",
@@ -326,11 +387,15 @@ def build_registry(
                 },
             },
             args_model=PlayMediaArgs,
-            run=make_play_media(profile, launcher),
+            run=make_play_media(
+                profile,
+                launcher,
+                video_fallback=(lambda q: play_video(PlayVideoArgs(name=q))) if play_video else None,
+                video_exact=(lambda q: play_video(PlayVideoArgs(name=q, exact=True))) if play_video else None,
+            ),
         )
     )
     if profile.drives:
-        where = State()  # the folder you last opened, shared by both tools
         registry.register(
             Tool(
                 name="open_drive_folder",
@@ -359,7 +424,7 @@ def build_registry(
                     },
                 },
                 args_model=PlayVideoArgs,
-                run=make_play_video(profile, launcher, where),
+                run=play_video,
             )
         )
     registry.register(

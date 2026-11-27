@@ -14,22 +14,22 @@ import itertools
 import logging
 import threading
 import time
-from datetime import datetime
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
 from jarvis.ai.ollama_client import OllamaClient, OllamaError
 from jarvis.briefing import reminder_briefing
-from jarvis.greeting import make_greeting
 from jarvis.config import Settings
+from jarvis.greeting import make_greeting
 from jarvis.memory.store import MemoryStore
 from jarvis.orchestrator import LLM_DOWN_SPEECH, State, VoiceAssistant
 from jarvis.profile import Profile
 from jarvis.reminders import ReminderScheduler
-from jarvis.tools.media import hint_names
 from jarvis.tools.drives import hint_names as drive_hint_names
+from jarvis.tools.media import hint_names
 from jarvis.tools.registry import ToolResult
 from jarvis.tools.weather import current_chip, fetch_forecast
 from jarvis.voice.interfaces import Trigger, VoiceError
@@ -151,7 +151,7 @@ class Engine(QObject):
         *,
         use_voice: bool = True,
         client: Any = None,
-        store: MemoryStore | None | bool = False,
+        store: MemoryStore | bool | None = False,
         profile: Profile | None = None,
         voice_builder: Callable[[Settings, list[str]], Any] | None = None,
         parent: QObject | None = None,
@@ -334,7 +334,7 @@ class Engine(QObject):
         self.confirmRequested.emit(request_id, prompt)
         try:
             return await asyncio.wait_for(future, CONFIRM_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
         finally:
             self._pending.pop(request_id, None)
@@ -448,7 +448,7 @@ class Engine(QObject):
             if self._voice_builder is not None:
                 stack = self._voice_builder(self.settings, hints)
             else:
-                from jarvis.voice.factory import build_voice_stack
+                from jarvis.voice.factory import build_voice_stack, make_ack_sound
 
                 stack = build_voice_stack(
                     self.settings, extra_hints=hints, correction_terms=self.profile.spoken_names()
@@ -489,6 +489,10 @@ class Engine(QObject):
             min_speech_seconds=voice.min_speech_seconds,
             max_record_seconds=voice.max_record_seconds,
             silence_peak=voice.silence_peak,
+            annotate=self.brain.turn_log.annotate if self.brain.turn_log is not None else None,
+            ack=make_ack_sound(stack.player, self.settings.voice.ack_sound),
+            wake_reply=self.settings.voice.wake_reply.strip(),
+            follow_up=self.settings.voice.wake_follow_up,
         )
         self._assistant = assistant
         if self.settings.ui.greet_on_start and not self._greeted:

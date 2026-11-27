@@ -97,8 +97,8 @@ class ToolExecutor:
                 return ToolResult.denied("Understood. I won't do that.")
 
         try:
-            result = await asyncio.wait_for(asyncio.to_thread(tool.run, args), self._timeout)
-        except asyncio.TimeoutError:
+            result = await asyncio.wait_for(asyncio.to_thread(tool.run, args), tool.timeout or self._timeout)
+        except TimeoutError:
             logger.error("Tool %s timed out after %.0fs", name, self._timeout)
             return ToolResult.failed("That took too long, so I gave up.")
         except Exception:

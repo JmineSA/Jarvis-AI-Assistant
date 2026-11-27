@@ -71,7 +71,7 @@ def _store_apps_via_powershell() -> list[dict]:
     """Windows only. One fixed command; nothing from the user is put into it."""
     if os.name != "nt":
         return []
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", "Get-StartApps | ConvertTo-Json -Compress"],
         capture_output=True, text=True, timeout=12, check=False,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),

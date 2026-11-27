@@ -163,3 +163,65 @@ def test_hint_names_and_registration(profile):
 
     assert "play_video" in build_registry(profile).names()
     assert "play_video" not in build_registry(Profile()).names()
+
+
+def test_play_media_falls_back_to_a_video_when_the_music_folder_has_no_match(profile, drive, tmp_path):
+    from jarvis.tools.media import PlayMediaArgs, make_play_media
+
+    music = tmp_path / "Music"
+    music.mkdir()
+    full = Profile.model_validate(
+        {"drives": [str(drive)], "music": {"folder": str(music), "player": "vlc"},
+         "apps": {"vlc": {"label": "VLC", "candidates": ["/bin/vlc"]}}}
+    )
+    video, launcher, _ = player(full)
+    run = make_play_media(full, launcher, which=lambda n: None, exists=lambda p: p == "/bin/vlc",
+                          resolver=lambda q: None, online=lambda: False,
+                          video_fallback=lambda q: video(PlayVideoArgs(name=q)))
+    result = run(PlayMediaArgs(name="Breaking Bad"))
+    assert result.status is ToolStatus.LAUNCHED
+    assert launcher.started == [["/bin/vlc", str(drive / "Series" / "Breaking Bad")]]
+    assert run(PlayMediaArgs(name="Titanic")).status is ToolStatus.FAILED
+
+
+def test_exact_title_only_matches_the_whole_title(tmp_path):
+    from jarvis.tools.media import PlayMediaArgs, make_play_media
+
+    root = tmp_path / "G"
+    for rel in ["Movies & Series/Movies/2026/The Run (2026)/The.Run.2026.1080p.mp4", "Movies & Series/Movies/2024/Run Lola Run/Run.Lola.Run.mkv"]:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+    prof = Profile.model_validate(
+        {"drives": [str(root)], "music": {"folder": str(tmp_path / "none"), "online": "youtube_music", "player": "vlc"},
+         "apps": {"vlc": {"label": "VLC", "candidates": ["/bin/vlc"]}}}
+    )
+    video, launcher, _ = player(prof)
+    web = []
+    run = make_play_media(prof, launcher, which=lambda n: None, exists=lambda p: p == "/bin/vlc",
+                          resolver=lambda q: web.append(q) or "abcdefghijk", online=lambda: True,
+                          video_exact=lambda q: video(PlayVideoArgs(name=q, exact=True)))
+    result = run(PlayMediaArgs(name="the run"))
+    assert result.status is ToolStatus.LAUNCHED and web == []  # your own "The Run" wins, YouTube is not asked
+    assert launcher.started[0][1].endswith("The.Run.2026.1080p.mp4")
+    run(PlayMediaArgs(name="lola"))  # only part of a title: goes to YouTube Music as before
+    assert web == ["lola"]
+
+
+def test_misheard_movie_title_still_finds_the_file(profile, drive):
+    run, launcher, _ = player(profile)
+    assert run(PlayVideoArgs(name="Xyzzy")).status is ToolStatus.FAILED  # nothing close: not guessed
+    assert run(PlayVideoArgs(name="Heats")).status is ToolStatus.LAUNCHED
+    assert launcher.started[-1][1].endswith("Heat.mkv")
+
+
+def test_misheard_multi_word_series_name(profile, drive):
+    run, launcher, _ = player(profile)
+    assert run(PlayVideoArgs(name="Braking Bad")).status is ToolStatus.LAUNCHED
+    assert launcher.started[-1] == ["/bin/vlc", str(drive / "Series" / "Breaking Bad")]
+
+
+def test_exact_mode_does_not_guess(profile, drive):
+    run, launcher, _ = player(profile)
+    assert run(PlayVideoArgs(name="Heet", exact=True)).status is ToolStatus.FAILED
+    assert launcher.started == []

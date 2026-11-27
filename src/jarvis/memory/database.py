@@ -44,6 +44,9 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX idx_reminders_due ON reminders(status, due_at);
     """,
+    """
+    ALTER TABLE reminders ADD COLUMN important INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 

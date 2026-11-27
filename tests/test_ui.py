@@ -482,3 +482,19 @@ def test_greeting_includes_todays_reminders_before_the_question(engine):
         "Good morning, boss. All systems are running. You have the team meeting at 10 AM. "
         "How can I help you this morning?"
     )
+
+
+def test_core_orb_breathes_and_ripples_by_state(qapp):
+    from jarvis.ui.widgets import CoreWidget
+
+    core = CoreWidget()
+    core.resize(520, 300)
+    core.set_state("idle")
+    core._advance()
+    assert core._ripple == 0.0 and core._breath > 0
+    core.set_state("speaking")
+    for _ in range(5):
+        core._advance()
+    assert core._ripple > 0
+    assert core.MOTION["thinking"][0] > core.MOTION["idle"][0]  # rings spin faster while thinking
+    assert not core.grab().isNull()

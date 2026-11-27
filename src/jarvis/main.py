@@ -20,7 +20,7 @@ import uvicorn
 
 from jarvis.ai.ollama_client import OllamaClient, OllamaError
 from jarvis.api.app import create_app
-from jarvis.config import ConfigError, Settings, load_settings
+from jarvis.config import ConfigError, Settings, load_settings, resolve_config_path
 from jarvis.logging_setup import setup_logging
 from jarvis.reminders import ReminderScheduler
 from jarvis.wiring import build_brain, load_user_profile, open_store
@@ -83,9 +83,9 @@ async def _chat_loop(settings: Settings) -> int:
 def _run_voice(settings: Settings, use_enter: bool) -> int:
     """Voice conversation: hold the push-to-talk key, speak, release, hear the answer."""
     from jarvis.orchestrator import State, VoiceAssistant
-    from jarvis.tools.media import hint_names
     from jarvis.tools.drives import hint_names as drive_hint_names
-    from jarvis.voice.factory import build_voice_stack
+    from jarvis.tools.media import hint_names
+    from jarvis.voice.factory import build_voice_stack, make_ack_sound
     from jarvis.voice.interfaces import VoiceError
 
     profile = load_user_profile(settings)
@@ -137,6 +137,10 @@ def _run_voice(settings: Settings, use_enter: bool) -> int:
         min_speech_seconds=settings.voice.min_speech_seconds,
         max_record_seconds=settings.voice.max_record_seconds,
         silence_peak=settings.voice.silence_peak,
+        annotate=brain.turn_log.annotate if brain.turn_log is not None else None,
+        ack=make_ack_sound(stack.player, settings.voice.ack_sound),
+        wake_reply=settings.voice.wake_reply.strip(),
+        follow_up=settings.voice.wake_follow_up,
     )
 
     # Reminders are spoken between conversations, only while JARVIS is running.
@@ -206,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app", "app", "music-check", "speed-check", "voice-demo"],
+        choices=["serve", "chat", "voice", "voice-check", "download-models", "memory", "add-app", "app", "music-check", "speed-check", "voice-demo", "wake-setup", "wake-check", "gmail-setup", "screen-check", "route-report", "tool-eval"],
         default="serve",
         help="serve: API server | chat: text chat | voice: talk to JARVIS | "
         "voice-check: test microphone, speakers and recognition | "
@@ -216,7 +220,8 @@ def main(argv: list[str] | None = None) -> int:
         "app: open the desktop dashboard | "
         "music-check: see what JARVIS finds in your music folder (add words to test a song) | "
         "speed-check: time the model and show whether it runs on the GPU | "
-        "voice-demo: hear the same sentence in several voices (add voice names to try others)",
+        "voice-demo: hear the same sentence in several voices (add voice names to try others) | "
+        "wake-setup: download the Hey JARVIS files (4 MB) and switch them on | wake-check: test the wake word | gmail-setup: allow read-only Gmail | screen-check: test screen reading | route-report: which sentences needed the model and how long each stage took | tool-eval: score the model on 40 sample sentences (add a model name to compare)",
     )
     parser.add_argument(
         "memory_args",
@@ -279,6 +284,30 @@ def main(argv: list[str] | None = None) -> int:
             from jarvis.diagnostics import run_speed_check
 
             return run_speed_check(settings)
+        if args.command == "wake-setup":
+            from jarvis.diagnostics import run_wake_setup
+
+            return run_wake_setup(settings, resolve_config_path())
+        if args.command == "route-report":
+            from jarvis.diagnostics import run_route_report
+
+            return run_route_report(settings)
+        if args.command == "tool-eval":
+            from jarvis.diagnostics import run_tool_eval
+
+            return run_tool_eval(settings, args.memory_args[0] if args.memory_args else None)
+        if args.command == "screen-check":
+            from jarvis.diagnostics import run_screen_check
+
+            return run_screen_check(settings)
+        if args.command == "gmail-setup":
+            from jarvis.diagnostics import run_gmail_setup
+
+            return run_gmail_setup(settings, resolve_config_path())
+        if args.command == "wake-check":
+            from jarvis.diagnostics import run_wake_check
+
+            return run_wake_check(settings)
         if args.command == "voice-demo":
             from jarvis.diagnostics import run_voice_demo
 

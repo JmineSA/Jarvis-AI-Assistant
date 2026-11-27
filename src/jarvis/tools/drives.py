@@ -13,6 +13,7 @@ you speak is only ever used to look things up in a listing of the drive.
 
 from __future__ import annotations
 
+import difflib
 import logging
 import math
 import os
@@ -134,14 +135,22 @@ def hint_names(profile: Profile, limit: int = 25) -> list[str]:
             if not root.is_dir():
                 continue
             for entry in get_index(root):
-                if not entry.is_file and len(entry.path.relative_to(root).parts) <= 2 and 2 < len(entry.path.name) <= 30:
-                    if entry.path.name.lower() not in {n.lower() for n in names}:
-                        names.append(entry.path.name)
+                shallow = not entry.is_file and len(entry.path.relative_to(root).parts) <= 2 and 2 < len(entry.path.name) <= 30
+                if shallow and entry.path.name.lower() not in {n.lower() for n in names}:
+                    names.append(entry.path.name)
                 if len(names) >= limit:
                     return names
         except OSError:
             continue
     return names
+
+
+_JUNK = re.compile(r"^(?:(?:19|20)\d{2}|\d{3,4}p|4k|x26[45]|h26[45]|hevc|bluray|brrip|webrip|web|dl|hdrip|dvdrip|aac|ac3|yify|yts|mx|mp4|mkv)$")
+
+
+def _title_words(tokens: frozenset[str]) -> frozenset[str]:
+    """A title's words without the year, resolution and release tags ("The Run (2026) 1080p" -> {run})."""
+    return frozenset(t for t in tokens if t not in _SPOKEN_FILLER and not _JUNK.match(t))
 
 
 class State:
@@ -166,16 +175,45 @@ def _inside(path: Path, roots: list[Path]) -> Path | None:
     return None
 
 
+def _close_words(word: str, vocab: set[str]) -> frozenset[str]:
+    """Words in your library that `word` could be a mishearing or typo of ("godfather" -> "godfather")."""
+    if word in vocab or len(word) < 4:
+        return frozenset({word})
+    near = [v for v in vocab if abs(len(v) - len(word)) <= 2 and v[0] == word[0]]
+    close = difflib.get_close_matches(word, near, n=3, cutoff=0.75)
+    prefixed = [v for v in near if v.startswith(word)][:3]
+    return frozenset({word, *close, *prefixed})
+
+
 def _pick(wanted: list[str], entries: list[Entry], files: bool, by: str) -> list[Entry]:
-    """Best matches: whole words, at least 75% of them, closest title first."""
+    """Best matches: whole words, at least 75% of them, closest title first.
+
+    If nothing matches, words that do not exist in your library are retried as their nearest
+    spellings, so "the godfather part too" or "interstellar" misheard as "interstaler" still finds it.
+    """
+    found = _pick_words([frozenset({w}) for w in wanted], wanted, entries, files, by)
+    if found:
+        return found
+    kind = [e for e in entries if e.is_file == files]
+    vocab: set[str] = set()
+    for e in kind:
+        vocab |= e.own if by == "own" else e.path_words
+    alts = [_close_words(w, vocab) for w in wanted]
+    if all(len(a) == 1 for a in alts):
+        return []
+    return _pick_words(alts, wanted, entries, files, by)
+
+
+def _pick_words(alts: list[frozenset[str]], wanted: list[str], entries: list[Entry], files: bool, by: str) -> list[Entry]:
     scored = []
+    spoken = set().union(*alts)
     for entry in entries:
         if entry.is_file != files:
             continue
         words = entry.own if by == "own" else entry.path_words
-        score = sum(1 for w in wanted if w in words)
+        score = sum(1 for options in alts if options & words)
         if score:
-            scored.append((score, len(words - set(wanted)), len(entry.path.parts), str(entry.path), entry))
+            scored.append((score, len(words - spoken), len(entry.path.parts), str(entry.path), entry))
     if not scored:
         return []
     need = 1 if len(wanted) == 1 else math.ceil(len(wanted) * 0.75)
@@ -254,6 +292,7 @@ def make_open_drive_folder(profile: Profile, launcher: Launcher, state: State) -
 class PlayVideoArgs(ToolArgs):
     name: str = ""
     folder: str = ""   # optional: look only inside the folder with this name
+    exact: bool = False  # only accept a video whose whole title is what was said (used before streaming)
 
 
 def make_play_video(
@@ -315,9 +354,19 @@ def make_play_video(
             return ToolResult.failed("Which movie? Tell me the name, or open the folder first.")
 
         results: list[Entry] = []
+        same = set(wanted)
         for root, where in base:
             inside = [e for e in get_index(root) if where == root or where in e.path.parents]
-            results.extend(_pick(wanted, inside, files=True, by="path"))
+            if args.exact:
+                # Whole-title matches only, decided before any "closest match" narrowing.
+                results.extend(
+                    e for e in inside
+                    if e.is_file and (
+                        _title_words(e.own) == same or _title_words(frozenset(_tokens(e.path.parent.name))) == same
+                    )
+                )
+            else:
+                results.extend(_pick(wanted, inside, files=True, by="path"))
         if not results:
             where = "that folder" if args.folder.strip() or (state.folder and base[0][1] == state.folder) else "your drive"
             return ToolResult.failed(f"I couldn't find a video matching {spoken} in {where}.")
@@ -327,7 +376,8 @@ def make_play_video(
         parents = {e.path.parent for e in results}
         if len(parents) == 1:
             folder = next(iter(parents))
-            if all(w in _tokens(folder.name) for w in wanted):
+            named = set(_tokens(folder.name))
+            if all(w in named or len(_close_words(w, named)) > 1 for w in wanted):
                 return start(folder, folder.name)
         return _ask([e.path for e in results], base[0][0], {}, "videos")
 

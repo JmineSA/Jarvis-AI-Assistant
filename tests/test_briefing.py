@@ -28,3 +28,10 @@ def test_single_reminder_and_limit_zero():
 
 def test_past_reminders_are_left_to_the_scheduler():
     assert reminder_briefing([rem(1, "early thing", 7)], NOW) == ""
+
+
+def test_important_reminders_are_read_first():
+    early = rem(1, "stretch", 10)
+    late = Reminder(2, "pay rent", datetime(2026, 11, 26, 17).timestamp(), 0.0, "pending", True)
+    text = reminder_briefing([early, late], NOW, limit=1)
+    assert text == "You have an important reminder: pay rent at 5 PM. And 1 more later today."

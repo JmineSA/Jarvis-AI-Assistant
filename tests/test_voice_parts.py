@@ -80,7 +80,7 @@ def test_voice_load_failure_becomes_voice_error():
         raise OSError("corrupt")
 
     tts = PiperSynthesizer(Path("voice.onnx"), voice_factory=broken)
-    with pytest.raises(VoiceError, match="voice.onnx"):
+    with pytest.raises(VoiceError, match=r"voice\.onnx"):
         tts.warm_up()
 
 
@@ -130,7 +130,7 @@ def test_interrupted_download_also_cleans_up(tmp_path):
 
 # ------------------------------------------------------------------ misheard name
 
-from jarvis.voice.stt import fix_assistant_name
+from jarvis.voice.stt import fix_assistant_name  # noqa: E402
 
 ALIASES = ["Travis", "Jervis"]
 

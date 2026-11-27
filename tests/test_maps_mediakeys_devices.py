@@ -58,7 +58,7 @@ def test_directions_start_from_home():
 
 
 def test_maps_still_work_with_no_home_at_all():
-    result, launcher = run_maps(profile(location=False), "ATM")
+    result, _launcher = run_maps(profile(location=False), "ATM")
     assert result.status is ToolStatus.LAUNCHED and "near your home" not in result.message
 
 

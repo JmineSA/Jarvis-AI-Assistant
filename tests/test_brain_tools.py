@@ -218,7 +218,6 @@ async def test_warm_up_is_harmless_with_a_client_that_cannot_warm_up(fake_client
 
 
 # ------------------------------------------------------------------ "which one?" follow-ups
-from dataclasses import dataclass  # noqa: E402
 
 from jarvis.ai.brain import pick_choice  # noqa: E402
 from jarvis.tools.registry import Tool, ToolArgs, ToolRegistry, ToolResult, ToolStatus  # noqa: E402
@@ -257,7 +256,7 @@ async def test_which_one_can_be_answered_next_turn(fake_client_cls, answer, expe
 
 async def test_which_one_can_be_cancelled_or_ignored(fake_client_cls):
     played = []
-    brain, client = _asking_brain(fake_client_cls, played)
+    brain, _client = _asking_brain(fake_client_cls, played)
     await brain.respond("play gym")
     assert await brain.respond("never mind") == "Okay, cancelled."
     await brain.respond("play gym")
@@ -292,3 +291,61 @@ async def test_several_routed_steps_run_in_order_and_stop_after_a_failure(fake_c
     brain = Brain(fake_client_cls(["x"]), "system", executor=ToolExecutor(registry), router=router)
     assert await brain.respond("do a then b then c") == "a done. b failed."
     assert ran == ["a", "b"]
+
+
+def test_tool_selector_sends_only_what_a_sentence_could_need():
+    from jarvis.ai.toolselect import ToolSelector
+    from jarvis.profile import Profile
+
+    names = ["open_app", "weather", "play_media", "set_reminder", "media_control", "brand_new_tool"]
+    schemas = [{"type": "function", "function": {"name": n}} for n in names]
+
+    def picked(text, recent=None):
+        return [s["function"]["name"] for s in ToolSelector(Profile()).select(text, schemas, recent)]
+
+    assert picked("will it rain tomorrow") == ["weather", "brand_new_tool"]  # unknown tools are always offered
+    assert "play_media" in picked("put on some Kanye West") and "weather" not in picked("put on some Kanye West")
+    assert picked("tell me something interesting about space") == ["brand_new_tool"]
+    assert "weather" in picked("what about tomorrow", recent=["weather"])  # follow-up keeps the last tool
+    assert "set_reminder" in picked("remind me to stretch")
+
+
+class _NoArgs(ToolArgs):
+    pass
+
+
+class _ScriptedClient:
+    """Plain chat answers 'fun fact'; with tools it first refuses, then (given the full list) calls the tool."""
+
+    def __init__(self):
+        self.offered = []
+        self.plain = 0
+
+    async def chat(self, messages):
+        self.plain += 1
+        return "Here is a fun fact."
+
+    async def chat_with_tools(self, messages, tools):
+        from jarvis.ai.ollama_client import ChatResult, ToolCall
+
+        self.offered.append([t["function"]["name"] for t in tools])
+        if "current_time" in self.offered[-1] and len(self.offered[-1]) > 1:
+            return ChatResult("", (ToolCall("current_time", {}),))
+        return ChatResult("I'm sorry, I can't do that.", ())
+
+
+async def test_plain_chat_gets_no_tools_and_a_refusal_is_retried_with_all():
+    from jarvis.ai.toolselect import ToolSelector
+
+    registry = ToolRegistry()
+    for name in ("current_time", "weather"):
+        registry.register(Tool(name, "d", {"type": "object", "properties": {}}, _NoArgs, lambda a: ToolResult.done("It is noon.")))
+    client = _ScriptedClient()
+    brain = Brain(client, "sys", 4, executor=ToolExecutor(registry), tool_selector=ToolSelector(Profile()))
+    assert await brain.respond("tell me a fun fact") == "Here is a fun fact."
+    assert client.offered == [] and client.plain == 1  # nothing matched: plain chat, no tool list sent
+
+    # "weather" matches only the weather tool; the model declines, so it is retried with every tool.
+    reply = await brain.respond("is it hot out")
+    assert client.offered[0] == ["weather"] and set(client.offered[1]) == {"current_time", "weather"}
+    assert reply == "It is noon."
